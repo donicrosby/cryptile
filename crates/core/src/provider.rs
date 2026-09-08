@@ -48,6 +48,14 @@ pub trait Provider: Send + Sync {
     /// was rejected) — the caller must re-login with the master secret.
     async fn refresh_session(&self, s: &Session) -> Result<Session, ProviderError>;
 
+    /// Unix-seconds expiry of the session's access token, if the backend
+    /// tracks one. `None` (the default) means unknown: callers fall back to
+    /// reactive refresh on auth failure.
+    fn session_expiry(&self, s: &Session) -> Option<u64> {
+        let _ = s;
+        None
+    }
+
     async fn list_namespaces(&self, s: &Session) -> Result<Vec<Namespace>, ProviderError>;
     async fn list_secrets(
         &self,

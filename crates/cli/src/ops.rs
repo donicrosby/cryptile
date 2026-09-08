@@ -16,6 +16,34 @@ fn map_retry(e: cryptile_core::ProviderError) -> String {
     }
 }
 
+/// Refresh margin: if the access token dies inside this window, rotate it
+/// before issuing backend requests instead of eating a 401 round-trip.
+const REFRESH_MARGIN_SECS: u64 = 300;
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Proactive half of token lifecycle: if the backend reports an expiry
+/// within the margin, rotate once up front. Failure here is non-fatal —
+/// the reactive AuthExpired path in each op stays the single authority
+/// for surfacing auth errors and the re-login remediation hint.
+async fn ensure_fresh(provider: &dyn Provider, session: &Session) -> Session {
+    let stale = provider
+        .session_expiry(session)
+        .is_some_and(|exp| now_unix().saturating_add(REFRESH_MARGIN_SECS) >= exp);
+    if !stale {
+        return session.clone();
+    }
+    match provider.refresh_session(session).await {
+        Ok(fresh) => fresh,
+        Err(_) => session.clone(),
+    }
+}
+
 /// `cryptile export --namespace N`: all values in a namespace. Returns the
 /// (possibly rotated) session alongside the secrets.
 pub async fn export(
@@ -38,19 +66,20 @@ pub async fn export(
         let secrets = p.get_namespace_secrets(&s, &target).await?;
         Ok((s, secrets))
     }
-    let (session, secrets) = match export_once(provider, session.clone(), namespace).await {
-        Ok(v) => v,
-        Err(cryptile_core::ProviderError::AuthExpired) => {
-            let fresh = provider
-                .refresh_session(&session)
-                .await
-                .map_err(|_| refresh_hint())?;
-            export_once(provider, fresh, namespace)
-                .await
-                .map_err(map_retry)?
-        }
-        Err(e) => return Err(e.to_string()),
-    };
+    let (session, secrets) =
+        match export_once(provider, ensure_fresh(provider, &session).await, namespace).await {
+            Ok(v) => v,
+            Err(cryptile_core::ProviderError::AuthExpired) => {
+                let fresh = provider
+                    .refresh_session(&session)
+                    .await
+                    .map_err(|_| refresh_hint())?;
+                export_once(provider, fresh, namespace)
+                    .await
+                    .map_err(map_retry)?
+            }
+            Err(e) => return Err(e.to_string()),
+        };
     Ok((session, secrets))
 }
 
@@ -93,17 +122,18 @@ pub async fn get(
     session: Session,
     r: &Ref,
 ) -> Result<(Session, String), String> {
-    let (session, secret) = match get_once(provider, session.clone(), r).await {
-        Ok(v) => v,
-        Err(cryptile_core::ProviderError::AuthExpired) => {
-            let fresh = provider
-                .refresh_session(&session)
-                .await
-                .map_err(|_| refresh_hint())?;
-            get_once(provider, fresh, r).await.map_err(map_retry)?
-        }
-        Err(e) => return Err(e.to_string()),
-    };
+    let (session, secret) =
+        match get_once(provider, ensure_fresh(provider, &session).await, r).await {
+            Ok(v) => v,
+            Err(cryptile_core::ProviderError::AuthExpired) => {
+                let fresh = provider
+                    .refresh_session(&session)
+                    .await
+                    .map_err(|_| refresh_hint())?;
+                get_once(provider, fresh, r).await.map_err(map_retry)?
+            }
+            Err(e) => return Err(e.to_string()),
+        };
     let field = secret
         .field(&r.field)
         .ok_or_else(|| format!("field '{}' not present on {}", r.field, r.locus))?;
@@ -117,32 +147,34 @@ pub async fn list(
     namespace: Option<String>,
 ) -> Result<(Session, Vec<String>), String> {
     let Some(ns) = namespace else {
-        let (session, names) = match list_ns_once(provider, session.clone()).await {
+        let (session, names) =
+            match list_ns_once(provider, ensure_fresh(provider, &session).await).await {
+                Ok(v) => v,
+                Err(cryptile_core::ProviderError::AuthExpired) => {
+                    let fresh = provider
+                        .refresh_session(&session)
+                        .await
+                        .map_err(|_| refresh_hint())?;
+                    list_ns_once(provider, fresh).await.map_err(map_retry)?
+                }
+                Err(e) => return Err(e.to_string()),
+            };
+        return Ok((session, names.into_iter().map(|n| n.name).collect()));
+    };
+
+    let (session, metas) =
+        match list_items_once(provider, ensure_fresh(provider, &session).await, &ns).await {
             Ok(v) => v,
             Err(cryptile_core::ProviderError::AuthExpired) => {
                 let fresh = provider
                     .refresh_session(&session)
                     .await
                     .map_err(|_| refresh_hint())?;
-                list_ns_once(provider, fresh).await.map_err(map_retry)?
+                list_items_once(provider, fresh, &ns)
+                    .await
+                    .map_err(map_retry)?
             }
             Err(e) => return Err(e.to_string()),
         };
-        return Ok((session, names.into_iter().map(|n| n.name).collect()));
-    };
-
-    let (session, metas) = match list_items_once(provider, session.clone(), &ns).await {
-        Ok(v) => v,
-        Err(cryptile_core::ProviderError::AuthExpired) => {
-            let fresh = provider
-                .refresh_session(&session)
-                .await
-                .map_err(|_| refresh_hint())?;
-            list_items_once(provider, fresh, &ns)
-                .await
-                .map_err(map_retry)?
-        }
-        Err(e) => return Err(e.to_string()),
-    };
     Ok((session, metas.into_iter().map(|m| m.name).collect()))
 }

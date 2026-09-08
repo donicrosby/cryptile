@@ -123,8 +123,8 @@ async fn export_env_passphrase_end_to_end() {
         .arg("shared")
         .arg("--passphrase-env")
         .arg("CRYPTILE_PASSPHRASE")
-        .assert()
-        .success();
+        .assert();
+    let assert = assert.success();
     let out = assert.get_output().stdout.clone();
     let text = String::from_utf8(out).unwrap();
     let expected = fx["expect"]["org_item_password"].as_str().unwrap();
@@ -237,4 +237,128 @@ fn mangle(name: &str, seen: &mut std::collections::BTreeMap<String, String>) -> 
     }
     seen.insert(candidate.clone(), name.to_string());
     candidate
+}
+
+/// Proactive refresh (add-token-lifecycle): a sealed session whose token
+/// expires inside the 300s margin must be refreshed BEFORE backend calls.
+/// The sync/collections mocks only answer `Authorization: Bearer fresh-at`;
+/// the stale token gets no mock, so success proves the rotation happened.
+#[tokio::test]
+async fn export_proactively_refreshes_near_expiry_session() {
+    use wiremock::matchers::header;
+
+    let fx = fixture();
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/identity/accounts/prelogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "kdf": 0,
+            "kdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+    // One token mock serves both the password grant (login) and the
+    // refresh grant (proactive rotation); both yield "fresh-at".
+    Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "fresh-at",
+            "refresh_token": "rt2",
+            "expires_in": 7200,
+            "key": fx["protected_user_key"],
+            "Kdf": 0,
+            "KdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/sync"))
+        .and(header("Authorization", "Bearer fresh-at"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "profile": {
+                "id": "u1",
+                "email": fx["email"],
+                "key": fx["protected_user_key"],
+                "privateKey": fx["protected_private_key"],
+                "organizations": [{
+                    "id": fx["org"]["org_id"],
+                    "key": fx["org_key"],
+                }],
+            },
+            "ciphers": [{
+                "id": fx["org"]["id"],
+                "name": fx["org"]["name"],
+                "organizationId": fx["org"]["org_id"],
+                "collectionIds": [fx["org"]["collection"]],
+                "login": {"password": fx["org"]["password"]},
+                "notes": fx["org"]["notes"],
+            }],
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/collections"))
+        .and(header("Authorization", "Bearer fresh-at"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": [{
+                "id": fx["org"]["collection"],
+                "organizationId": fx["org"]["org_id"],
+                "name": fx["org"]["coll_name"],
+            }],
+            "object": "list",
+        })))
+        .mount(&server)
+        .await;
+
+    // Real login, then age the session: stale token, expiry inside margin.
+    let provider = cryptile_vaultwarden::VaultwardenProvider::new(&server.uri()).unwrap();
+    let session = provider
+        .login(cryptile_core::LoginParams {
+            account: fx["email"].as_str().unwrap().into(),
+            secret: secrecy::SecretString::from(fx["password"].as_str().unwrap()),
+        })
+        .await
+        .unwrap();
+    let mut handle: serde_json::Value = serde_json::from_str(&session.handle).unwrap();
+    handle["access_token"] = serde_json::json!("stale-at");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    handle["expires_at"] = serde_json::json!(now + 60);
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("state");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::json!({"server": server.uri(), "account": fx["email"]}).to_string(),
+    )
+    .unwrap();
+    let line = cryptile_core::keyring::seal(
+        &handle.to_string(),
+        &secrecy::SecretString::from("keyring-pass"),
+    )
+    .unwrap();
+    std::fs::write(dir.join("keyring"), line).unwrap();
+
+    let mut cmd = Command::cargo_bin("cryptile").unwrap();
+    let assert = cmd
+        .env("CRYPTILE_PASSPHRASE", "keyring-pass")
+        .arg("--state-dir")
+        .arg(&dir)
+        .arg("export")
+        .arg("--namespace")
+        .arg("shared")
+        .arg("--passphrase-env")
+        .arg("CRYPTILE_PASSPHRASE")
+        .assert();
+    let assert = assert.success();
+    let text = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let expected = fx["expect"]["org_item_password"].as_str().unwrap();
+    assert!(
+        text.contains(&format!("PASSWORD={expected}")),
+        "expected PASSWORD={expected} after proactive refresh, got:\n{text}"
+    );
 }

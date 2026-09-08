@@ -19,4 +19,3 @@ pub use model::{Namespace, Secret, SecretMeta, Session};
 pub use provider::{LoginParams, Provider, ProviderError};
 pub use reference::{ParseRefError, Ref};
 pub use secrecy::{ExposeSecret, SecretString};
-pub use value::Redaction;

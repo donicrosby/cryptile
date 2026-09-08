@@ -1,7 +1,7 @@
 # foundation Specification
 
 ## Purpose
-TBD - created by archiving change add-foundation. Update Purpose after archive.
+Defines the cross-backend contract cryptile depends on: the `Provider` facade trait (auth, refresh, namespaces, items, values), scoped machine access semantics, at-rest session sealing, and CLI-visible behaviors (exit codes, redaction-free output, export key mangling) that every backend must satisfy.
 
 ## Requirements
 
@@ -49,20 +49,6 @@ passphrase via Argon2id.
 - THEN the credential file is encrypted (Argon2id-derived key) and mode 0600 in a
   user-owned directory
 
-### Requirement: Log and output redaction
-
-The system SHALL redact secret values in all log output, debug formatting, and error
-messages. An explicit `--no-redact` flag SHALL only take effect when both stdin and
-stdout are interactive TTYs.
-
-#### Scenario: redaction by default
-- WHEN a `SecretValue` is formatted via Debug or Display in a non-TTY context
-- THEN the output shows a placeholder, not the underlying value
-
-#### Scenario: no-redact gating
-- WHEN `--no-redact` is passed but stdout is piped (non-TTY)
-- THEN the flag is refused with a non-zero exit and no value is printed
-
 ### Requirement: Vaultwarden machine access via service account
 
 The vaultwarden backend SHALL authenticate as a dedicated service-account user whose
@@ -82,18 +68,33 @@ organization/collection ACLs.
 
 ### Requirement: Token lifecycle
 
-The backend SHALL cache access tokens, refresh them silently before expiry or on a 401
-response, and on refresh failure SHALL surface a remediation hint rather than retry
+The backend SHALL cache access tokens, record their expiry, refresh them
+silently before expiry (within a 300-second margin) or on a 401 response,
+and on refresh failure SHALL surface a remediation hint rather than retry
 loops.
 
 #### Scenario: silent refresh
+
 - WHEN a token expires mid-session and a valid refresh token exists
 - THEN the next request succeeds without user interaction
 
+#### Scenario: proactive refresh within margin
+
+- WHEN a sealed session's access token expires within the 300-second margin
+- THEN the next command refreshes the token via the refresh grant before
+  issuing backend requests and persists the rotated session on success
+
 #### Scenario: refresh failure
+
 - WHEN the refresh token is revoked or invalid
-- THEN the CLI exits non-zero with a remediation hint naming the re-login command
-  and performs no further network retries
+- THEN the CLI exits non-zero with a remediation hint naming the re-login
+  command and performs no further network retries
+
+#### Scenario: legacy sealed session
+
+- WHEN a sealed session predates expiry tracking and records no expiry
+- THEN commands proceed without proactive refresh and remain covered by the
+  401-triggered refresh path
 
 ### Requirement: Export command
 
@@ -134,3 +135,23 @@ stdin blindly.
 
 - WHEN no `--passphrase-env` is given and stdin is not a TTY
 - THEN the command fails with a remediation hint and nonzero exit
+
+### Requirement: Structural redaction
+
+The system SHALL redact secret values in all log output, debug formatting,
+and error messages. Secret values SHALL carry no `Display` implementation;
+their `Debug` output SHALL show a placeholder. Raw values SHALL leave the
+process only at the explicit stdout output boundary of `get` and `export`,
+and there SHALL be no flag or configuration that weakens this boundary.
+
+#### Scenario: redaction by default
+
+- WHEN a `SecretValue` is formatted via Debug or Display in a non-TTY context
+- THEN the output shows a placeholder, not the underlying value
+
+#### Scenario: no display path
+
+- WHEN library code outside the CLI stdout boundary attempts to print a
+  secret value
+- THEN no such code path compiles, because the value type exposes no
+  Display and requires an explicit expose call

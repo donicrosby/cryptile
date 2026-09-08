@@ -91,7 +91,7 @@ fn read_secret(prompt: &str) -> Result<SecStr, String> {
         .map_err(|e| e.to_string())
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let state = match &cli.state_dir {

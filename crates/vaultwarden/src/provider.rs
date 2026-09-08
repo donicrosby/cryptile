@@ -29,6 +29,10 @@ struct VwSession {
     /// 64B user key, base64. Present only while the process runs; the
     /// keyring wraps this whole struct when persisting.
     user_key_b64: String,
+    /// Access-token expiry, unix seconds. Absent in sessions sealed before
+    /// expiry tracking existed; those fall back to reactive 401 refresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at: Option<u64>,
 }
 
 impl VaultwardenProvider {
@@ -158,12 +162,17 @@ impl Provider for VaultwardenProvider {
             access_token: token.access_token,
             refresh_token: token.refresh_token.or_else(|| sess.refresh_token.clone()),
             user_key_b64: sess.user_key_b64.clone(),
+            expires_at: now_unix().map(|t| t + token.expires_in),
         };
         Ok(Session {
             provider: "vw".into(),
             handle: serde_json::to_string(&out)
                 .map_err(|e| ProviderError::Server(e.to_string()))?,
         })
+    }
+
+    fn session_expiry(&self, s: &Session) -> Option<u64> {
+        parse_session(s).ok().and_then(|h| h.expires_at)
     }
 
     async fn login(&self, params: LoginParams) -> Result<Session, ProviderError> {
@@ -187,6 +196,7 @@ impl Provider for VaultwardenProvider {
             access_token: token.access_token,
             refresh_token: token.refresh_token,
             user_key_b64,
+            expires_at: now_unix().map(|t| t + token.expires_in),
         };
         Ok(Session {
             provider: "vw".into(),
@@ -347,6 +357,15 @@ fn ok_metas(m: Vec<SecretMeta>) -> Result<Vec<SecretMeta>, ProviderError> {
 fn parse_session(s: &Session) -> Result<VwSession, ProviderError> {
     serde_json::from_str(&s.handle)
         .map_err(|e| ProviderError::Auth(format!("corrupt session: {e}")))
+}
+
+/// Wall clock, unix seconds. `None` only if the platform has no clock
+/// (never on supported targets); expiry tracking degrades to reactive.
+fn now_unix() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
 }
 
 fn sess_user_key(sess: &VwSession) -> Result<SymmetricKey, ProviderError> {
