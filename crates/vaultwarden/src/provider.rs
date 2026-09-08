@@ -38,28 +38,6 @@ impl VaultwardenProvider {
         })
     }
 
-    /// Refresh the session's access token via the refresh-token grant.
-    /// The user key outlives tokens (it is unrelated to them), so the new
-    /// session keeps it. Fails with `AuthExpired` if no refresh token was
-    /// stored — callers then re-login with the master password.
-    pub async fn refresh_session(&self, s: &Session) -> Result<Session, ProviderError> {
-        let sess: VwSession = parse_session(s)?;
-        let Some(rt) = sess.refresh_token.as_ref() else {
-            return Err(ProviderError::AuthExpired);
-        };
-        let token = self.client.token_refresh(rt).await.map_err(map_api)?;
-        let out = VwSession {
-            access_token: token.access_token,
-            refresh_token: token.refresh_token.or_else(|| sess.refresh_token.clone()),
-            user_key_b64: sess.user_key_b64.clone(),
-        };
-        Ok(Session {
-            provider: "vw".into(),
-            handle: serde_json::to_string(&out)
-                .map_err(|e| ProviderError::Server(e.to_string()))?,
-        })
-    }
-
     async fn sync_and_keys(
         &self,
         access_token: &str,
@@ -165,6 +143,27 @@ fn unwrap_user_key(
 impl Provider for VaultwardenProvider {
     fn id(&self) -> &'static str {
         "vw"
+    }
+
+    /// Refresh via the refresh-token grant. The user key outlives tokens (it
+    /// is unrelated to them), so the new session keeps it. `AuthExpired` when
+    /// no refresh token was stored — callers re-login with the master password.
+    async fn refresh_session(&self, s: &Session) -> Result<Session, ProviderError> {
+        let sess: VwSession = parse_session(s)?;
+        let Some(rt) = sess.refresh_token.as_ref() else {
+            return Err(ProviderError::AuthExpired);
+        };
+        let token = self.client.token_refresh(rt).await.map_err(map_api)?;
+        let out = VwSession {
+            access_token: token.access_token,
+            refresh_token: token.refresh_token.or_else(|| sess.refresh_token.clone()),
+            user_key_b64: sess.user_key_b64.clone(),
+        };
+        Ok(Session {
+            provider: "vw".into(),
+            handle: serde_json::to_string(&out)
+                .map_err(|e| ProviderError::Server(e.to_string()))?,
+        })
     }
 
     async fn login(&self, params: LoginParams) -> Result<Session, ProviderError> {

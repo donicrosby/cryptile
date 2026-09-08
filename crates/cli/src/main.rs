@@ -12,9 +12,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use cryptile_core::provider::Provider;
 use cryptile_core::{ExposeSecret, Keyring, Ref};
-use cryptile_vaultwarden::VaultwardenProvider;
 use secrecy::SecretString as SecStr;
 
 use state::{State, StateConfig};
@@ -124,9 +122,9 @@ async fn main() -> ExitCode {
                 Ok(p) => p,
                 Err(e) => return die(e, 2),
             };
-            let provider = match VaultwardenProvider::new(&server) {
+            let provider = match registry::open("vw", Some(&server)) {
                 Ok(p) => p,
-                Err(e) => return die(e.to_string(), 2),
+                Err(e) => return die(e, 2),
             };
             let session = match provider
                 .login(cryptile_core::LoginParams {
@@ -154,11 +152,11 @@ async fn main() -> ExitCode {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
-            let provider = match VaultwardenProvider::new(&cfg.server) {
+            let provider = match registry::open(&r.scheme, Some(&cfg.server)) {
                 Ok(p) => p,
-                Err(e) => return die(e.to_string(), 2),
+                Err(e) => return die(e, 2),
             };
-            match ops::get(&provider, session, &r).await {
+            match ops::get(provider.as_ref(), session, &r).await {
                 Ok((sess, value)) => {
                     reseal(&state, &sess, &passphrase);
                     println!("{value}");
@@ -172,11 +170,11 @@ async fn main() -> ExitCode {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
-            let provider = match VaultwardenProvider::new(&cfg.server) {
+            let provider = match registry::open(&session.provider, Some(&cfg.server)) {
                 Ok(p) => p,
-                Err(e) => return die(e.to_string(), 2),
+                Err(e) => return die(e, 2),
             };
-            match ops::list(&provider, session, namespace).await {
+            match ops::list(provider.as_ref(), session, namespace).await {
                 Ok((sess, names)) => {
                     reseal(&state, &sess, &passphrase);
                     for n in names {
@@ -200,11 +198,11 @@ async fn main() -> ExitCode {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
-            let provider = match VaultwardenProvider::new(&cfg.server) {
+            let provider = match registry::open(&session.provider, Some(&cfg.server)) {
                 Ok(p) => p,
-                Err(e) => return die(e.to_string(), 2),
+                Err(e) => return die(e, 2),
             };
-            match ops::export(&provider, session, &namespace).await {
+            match ops::export(provider.as_ref(), session, &namespace).await {
                 Ok((sess, secrets)) => {
                     reseal(&state, &sess, &passphrase);
                     match format.as_str() {

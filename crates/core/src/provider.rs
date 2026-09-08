@@ -42,6 +42,12 @@ pub trait Provider: Send + Sync {
     fn id(&self) -> &'static str;
 
     async fn login(&self, params: LoginParams) -> Result<Session, ProviderError>;
+
+    /// Rotate the session's access token using its refresh token. The new
+    /// session replaces the old; `AuthExpired` means no refresh token (or it
+    /// was rejected) — the caller must re-login with the master secret.
+    async fn refresh_session(&self, s: &Session) -> Result<Session, ProviderError>;
+
     async fn list_namespaces(&self, s: &Session) -> Result<Vec<Namespace>, ProviderError>;
     async fn list_secrets(
         &self,

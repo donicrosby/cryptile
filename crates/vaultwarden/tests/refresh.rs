@@ -4,6 +4,7 @@
 //! must fall back to password re-login).
 
 use cryptile_core::model::Session;
+use cryptile_core::provider::Provider;
 use cryptile_vaultwarden::VaultwardenProvider;
 use serde_json::json;
 use wiremock::matchers::{body_string_contains, method, path};

@@ -3,7 +3,7 @@
 //! the boundary itself is what these tests pin down.
 
 use assert_cmd::Command;
-use predicates::str::{contains, is_empty};
+use predicates::str::contains;
 
 fn cryptile() -> Command {
     let mut c = Command::cargo_bin("cryptile").unwrap();
@@ -105,10 +105,6 @@ fn list_without_login_is_exit_3() {
 }
 
 #[test]
-fn backends_lists_nothing_yet_but_succeeds() {
-    cryptile()
-        .arg("backends")
-        .assert()
-        .success()
-        .stdout(is_empty());
+fn backends_lists_linked_backends() {
+    cryptile().arg("backends").assert().success().stdout("vw\n");
 }

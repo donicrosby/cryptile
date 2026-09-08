@@ -3,7 +3,6 @@
 
 use cryptile_core::provider::Provider;
 use cryptile_core::{ExposeSecret, Namespace, Ref, Secret, SecretMeta, Session};
-use cryptile_vaultwarden::VaultwardenProvider;
 
 fn refresh_hint() -> String {
     "session expired and refresh failed; run `cryptile login` to re-establish".into()
@@ -20,12 +19,12 @@ fn map_retry(e: cryptile_core::ProviderError) -> String {
 /// `cryptile export --namespace N`: all values in a namespace. Returns the
 /// (possibly rotated) session alongside the secrets.
 pub async fn export(
-    provider: &VaultwardenProvider,
+    provider: &dyn Provider,
     session: Session,
     namespace: &str,
 ) -> Result<(Session, Vec<Secret>), String> {
     async fn export_once(
-        p: &VaultwardenProvider,
+        p: &dyn Provider,
         s: Session,
         namespace: &str,
     ) -> Result<(Session, Vec<Secret>), cryptile_core::ProviderError> {
@@ -56,7 +55,7 @@ pub async fn export(
 }
 
 async fn get_once(
-    p: &VaultwardenProvider,
+    p: &dyn Provider,
     s: Session,
     r: &Ref,
 ) -> Result<(Session, Secret), cryptile_core::ProviderError> {
@@ -65,7 +64,7 @@ async fn get_once(
 }
 
 async fn list_ns_once(
-    p: &VaultwardenProvider,
+    p: &dyn Provider,
     s: Session,
 ) -> Result<(Session, Vec<Namespace>), cryptile_core::ProviderError> {
     let ns = p.list_namespaces(&s).await?;
@@ -73,7 +72,7 @@ async fn list_ns_once(
 }
 
 async fn list_items_once(
-    p: &VaultwardenProvider,
+    p: &dyn Provider,
     s: Session,
     ns: &str,
 ) -> Result<(Session, Vec<SecretMeta>), cryptile_core::ProviderError> {
@@ -90,7 +89,7 @@ async fn list_items_once(
 /// `cryptile get <ref>`: one field value. Returns the (possibly rotated)
 /// session alongside so the caller can re-seal it.
 pub async fn get(
-    provider: &VaultwardenProvider,
+    provider: &dyn Provider,
     session: Session,
     r: &Ref,
 ) -> Result<(Session, String), String> {
@@ -113,7 +112,7 @@ pub async fn get(
 
 /// `cryptile list [namespace]`: namespace names, or item names in one.
 pub async fn list(
-    provider: &VaultwardenProvider,
+    provider: &dyn Provider,
     session: Session,
     namespace: Option<String>,
 ) -> Result<(Session, Vec<String>), String> {

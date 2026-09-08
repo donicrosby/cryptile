@@ -1,10 +1,28 @@
-//! Backend registry. Backends register here as they land; the CLI dispatches
-//! on ref scheme and never branches on backend specifics.
+//! Backend registry = the CLI's composition root. Backend crates are linked
+//! HERE and nowhere else: ops/main speak `dyn Provider` only, dispatching on
+//! ref scheme. Adding a backend = one match arm here plus its crate dep.
+
+use cryptile_core::provider::Provider;
+
+/// Build the provider for a ref scheme / stored backend id.
+pub fn open(scheme: &str, server: Option<&str>) -> Result<Box<dyn Provider>, String> {
+    match scheme {
+        "vw" => {
+            use cryptile_vaultwarden::VaultwardenProvider;
+            let server = server.ok_or_else(|| {
+                "vw backend needs a server URL (run `cryptile login`)".to_string()
+            })?;
+            let p = VaultwardenProvider::new(server).map_err(|e| e.to_string())?;
+            Ok(Box::new(p))
+        }
+        other => Err(format!(
+            "no backend linked for '{other}'; registered: {}",
+            backends().join(", ")
+        )),
+    }
+}
 
 /// Ids of backends linked into this build, in registration order.
-/// cryptile-vaultwarden lands next; slots are reserved by scheme in refs:
-/// `vw` (vaultwarden/bitwarden), `op` (1password), `vault` (openbao/vault).
-pub fn backends() -> Vec<&'static str> {
-    // No backend crates are linked yet; this grows as they land.
-    Vec::new()
+pub fn backends() -> Vec<String> {
+    vec!["vw".into()]
 }
