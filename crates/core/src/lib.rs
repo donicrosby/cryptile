@@ -8,11 +8,13 @@
 //! Backends (cryptile-vaultwarden, future cryptile-op, cryptile-vault) depend on this
 //! crate and never on each other. The Provider trait lands with the first backend.
 
+pub mod keyring;
 pub mod model;
 pub mod provider;
 pub mod reference;
 pub mod value;
 
+pub use keyring::{Keyring, KeyringError};
 pub use model::{Namespace, Secret, SecretMeta, Session};
 pub use provider::{LoginParams, Provider, ProviderError};
 pub use reference::{ParseRefError, Ref};
