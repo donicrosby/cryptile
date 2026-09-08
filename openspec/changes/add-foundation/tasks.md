@@ -15,7 +15,7 @@
 - [x] 3.1 HTTP client: prelogin, KDF negotiation (Argon2id/PBKDF2), password grant login, token refresh
 - [x] 3.2 Crypto: master key derivation, HKDF expand for user key, auth hash, RSA-OAEP org key unwrap, AES-CBC-HMAC cipher decryption, type-tagged value parsing
 - [x] 3.3 Sync + mapping: `/api/sync` → ciphers filtered to target collection(s) → `Secret` field bags
-- [ ] 3.4 Keyring: Argon2id passphrase-encrypted credential file, 0600, root-only dir; silent refresh on 401
+- [x] 3.4 Keyring: Argon2id passphrase-encrypted credential file, 0600, root-only dir; silent refresh on 401
 
 ## 4. CLI
 - [ ] 4.1 `cryptile login` — interactive prompt (TTY-gated), stores server URL + service account creds

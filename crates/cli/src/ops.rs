@@ -1,0 +1,111 @@
+//! Provider ops with 4.5 refresh semantics: on AuthExpired, refresh once
+//! via the session's refresh token and retry once. No loops, one hint.
+
+use cryptile_core::provider::Provider;
+use cryptile_core::{ExposeSecret, Namespace, Ref, Secret, SecretMeta, Session};
+use cryptile_vaultwarden::VaultwardenProvider;
+
+fn refresh_hint() -> String {
+    "session expired and refresh failed; run `cryptile login` to re-establish".into()
+}
+
+fn map_retry(e: cryptile_core::ProviderError) -> String {
+    if matches!(e, cryptile_core::ProviderError::AuthExpired) {
+        refresh_hint()
+    } else {
+        e.to_string()
+    }
+}
+
+async fn get_once(
+    p: &VaultwardenProvider,
+    s: Session,
+    r: &Ref,
+) -> Result<(Session, Secret), cryptile_core::ProviderError> {
+    let secret = p.get_secret(&s, r).await?;
+    Ok((s, secret))
+}
+
+async fn list_ns_once(
+    p: &VaultwardenProvider,
+    s: Session,
+) -> Result<(Session, Vec<Namespace>), cryptile_core::ProviderError> {
+    let ns = p.list_namespaces(&s).await?;
+    Ok((s, ns))
+}
+
+async fn list_items_once(
+    p: &VaultwardenProvider,
+    s: Session,
+    ns: &str,
+) -> Result<(Session, Vec<SecretMeta>), cryptile_core::ProviderError> {
+    let list = p.list_namespaces(&s).await?;
+    let target = list
+        .iter()
+        .find(|n| n.name.eq_ignore_ascii_case(ns))
+        .cloned()
+        .ok_or_else(|| cryptile_core::ProviderError::NotFound(format!("namespace {ns}")))?;
+    let metas = p.list_secrets(&s, &target).await?;
+    Ok((s, metas))
+}
+
+/// `cryptile get <ref>`: one field value. Returns the (possibly rotated)
+/// session alongside so the caller can re-seal it.
+pub async fn get(
+    provider: &VaultwardenProvider,
+    session: Session,
+    r: &Ref,
+) -> Result<(Session, String), String> {
+    let (session, secret) = match get_once(provider, session.clone(), r).await {
+        Ok(v) => v,
+        Err(cryptile_core::ProviderError::AuthExpired) => {
+            let fresh = provider
+                .refresh_session(&session)
+                .await
+                .map_err(|_| refresh_hint())?;
+            get_once(provider, fresh, r).await.map_err(map_retry)?
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let field = secret
+        .field(&r.field)
+        .ok_or_else(|| format!("field '{}' not present on {}", r.field, r.locus))?;
+    Ok((session, field.expose_secret().to_string()))
+}
+
+/// `cryptile list [namespace]`: namespace names, or item names in one.
+pub async fn list(
+    provider: &VaultwardenProvider,
+    session: Session,
+    namespace: Option<String>,
+) -> Result<(Session, Vec<String>), String> {
+    let Some(ns) = namespace else {
+        let (session, names) = match list_ns_once(provider, session.clone()).await {
+            Ok(v) => v,
+            Err(cryptile_core::ProviderError::AuthExpired) => {
+                let fresh = provider
+                    .refresh_session(&session)
+                    .await
+                    .map_err(|_| refresh_hint())?;
+                list_ns_once(provider, fresh).await.map_err(map_retry)?
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        return Ok((session, names.into_iter().map(|n| n.name).collect()));
+    };
+
+    let (session, metas) = match list_items_once(provider, session.clone(), &ns).await {
+        Ok(v) => v,
+        Err(cryptile_core::ProviderError::AuthExpired) => {
+            let fresh = provider
+                .refresh_session(&session)
+                .await
+                .map_err(|_| refresh_hint())?;
+            list_items_once(provider, fresh, &ns)
+                .await
+                .map_err(map_retry)?
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    Ok((session, metas.into_iter().map(|m| m.name).collect()))
+}
