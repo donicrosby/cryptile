@@ -15,6 +15,11 @@ first-class from day one, not retrofitted.
 - Establish the `cryptile` Rust workspace: `cryptile` (portable CLI), `cryptile-core`
   (backend-agnostic domain model + Provider trait facade), `cryptile-vaultwarden`
   (first backend), later `cryptile-hermes` (Hermes SecretSource plugin).
+- Secret values are carried in `secrecy::SecretString` (redacted Debug, zeroize on
+  drop) — no hand-rolled value wrapper. Dependency policy: pull ecosystem crates
+  (secrecy, argon2, etc.) rather than implementing in-house; keep deps within one
+  major version of current (one minor while major is 0); cargo-deny enforces
+  advisories, yanked, licenses (GPL deliberately excluded), and sources in CI.
 - Define the `Provider` facade trait (async, object-safe) with a normalized resource model:
   `Secret`, `Namespace` (collection/project/folder), `Ref` (cross-backend stable reference).
 - Define the normalized reference format `provider:path/to/secret#field` used by CLI flags,

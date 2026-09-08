@@ -12,6 +12,7 @@ repository = "https://github.com/donicrosby/cryptile"
 [workspace.dependencies]
 cryptile-core = { path = "crates/core" }
 clap = { version = "4", features = ["derive", "string"] }
+secrecy = "0.10"
 
 [profile.release]
 lto = "thin"

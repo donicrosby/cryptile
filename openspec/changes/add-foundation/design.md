@@ -71,6 +71,13 @@ refreshes on 401/expiry. Rotating the service account password never invalidates
 
 ## Security decisions (already made with Doni)
 
+- Secret values live in `secrecy::SecretString` end to end (redacted Debug,
+  zeroize-on-drop). No custom `SecretValue` wrapper — ecosystem over in-house.
+- Dependency policy: prefer ecosystem crates over in-house implementations
+  (secrecy for redaction/zeroize; argon2, hkdf, aes, cbc, hmac, rsa for backend
+  crypto when it lands); keep deps within one major version of latest (one minor
+  while major is 0); cargo-deny gate in CI for advisories/yanked/licenses/sources.
+  GPL excluded by policy (no bitwarden-sdk).
 - Tier 1 (server-side scoping via dedicated service account + collection ACL) +
   tier 2 (context isolation: values land in Hermes env, never in conversation) —
   explicitly NOT tier 3 (broker). If tier 3 is ever wanted, it's a separate consumer

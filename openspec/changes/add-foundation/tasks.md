@@ -3,7 +3,7 @@
 ## 1. Workspace scaffold
 - [x] 1.1 Create Rust workspace: `crates/{cli,core,vaultwarden}` + root `Cargo.toml` with workspace deps
 - [x] 1.2 Add README (positioning vs BSM/Vaultwarden, tier 1+2 threat model), LICENSE (Apache-2.0), rustfmt.toml, clippy gate
-- [ ] 1.3 CI workflow: fmt + clippy + test on stable + MSRV, cargo-deny in audit mode
+- [ ] 1.3 CI workflow: fmt + clippy + test on stable; cargo-deny (advisories, yanked, licenses, sources)
 - [x] 1.4 Zero-code start: no stub `main.rs` that compiles to nothing — first commit ships `Ref` parsing with tests
 
 ## 2. Core: refs and model
@@ -22,7 +22,7 @@
 - 4.2 `cryptile export` — lands with Hermes plugin change, not MVP CLI
 - [ ] 4.2 `cryptile get <ref>` — prints single field value, exit codes per ProviderError kind
 - [ ] 4.3 `cryptile list` — collections and item names (metadata only, values redacted)
-- [ ] 4.4 Redaction infrastructure: `SecretValue` wrapper everywhere, TTY-gated `--no-redact`
+- [ ] 4.4 Redaction infrastructure: `SecretString` (secrecy) everywhere, TTY-gated `--no-redact`
 - [ ] 4.5 `rotate-token` behavior: on AUTH_EXPIRED, drop cached token, one re-login attempt, else fail with remediation hint
 
 ## 5. Repo mechanics

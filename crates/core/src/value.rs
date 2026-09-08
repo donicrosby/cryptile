@@ -1,56 +1,21 @@
-//! Secret-carrying values with enforced redaction.
+//! Secret-carrying values with enforced redaction — delegated to `secrecy`.
 //!
-//! The one rule of cryptile: secret material only ever exists inside a
-//! [`SecretValue`]. Its `Debug` and `Display` impls print a placeholder; the real
-//! value leaves the process exclusively via [`SecretValue::expose`] at the final
-//! output boundary (CLI stdout writer), which is TTY/redaction-policy checked by
-//! the caller — never during logging or formatting.
+//! [`secrecy::SecretString`] (backed by its `zeroize` dependency) provides:
+//! - `Debug` that prints `[REDACTED]`
+//! - zeroization on drop: plaintext is wiped from the heap when the value
+//!   leaves scope, which a plain `String` wrapper cannot guarantee
+//!
+//! This module adds only the re-export, the redaction policy type, and the
+//! output-boundary rule: raw values leave the process exclusively via
+//! `expose_secret()` at the CLI stdout writer — never during logging or
+//! intermediate formatting.
 
-use std::fmt;
+pub use secrecy::{ExposeSecret, SecretString};
 
-/// Redaction placeholder used by Debug/Display.
-pub const REDACTED: &str = "<redacted>";
+/// Placeholder secrecy's `Debug` impl prints for secret values.
+pub const REDACTED: &str = "[REDACTED]";
 
-/// A wrapper around secret material that refuses to print itself.
-#[derive(Clone)]
-pub struct SecretValue(String);
-
-impl SecretValue {
-    /// Wrap raw secret material.
-    pub fn new(raw: impl Into<String>) -> Self {
-        Self(raw.into())
-    }
-
-    /// Raw access. Callers at the output boundary only — this is the single
-    /// escape hatch and is intentionally loud in code review.
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-
-    /// Length in bytes. Safe to log; leaky only for lengths, which we accept
-    /// for error messages ("value was empty").
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl fmt::Debug for SecretValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(REDACTED)
-    }
-}
-
-impl fmt::Display for SecretValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(REDACTED)
-    }
-}
-
-/// Whether value output is allowed. Derived once at startup from
+/// Whether raw value output is allowed. Derived once at startup from
 /// `--no-redact AND stdin.isatty() AND stdout.isatty()` and threaded through
 /// explicitly — never read from ambient state at print time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +25,7 @@ pub struct Redaction {
 
 impl Redaction {
     /// Default posture: redacted everywhere.
-    pub const fn strict() -> Self {
+    pub fn strict() -> Self {
         Self {
             allow_raw_output: false,
         }
@@ -72,17 +37,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn debug_and_display_redact() {
-        let v = SecretValue::new("hunter2");
-        assert_eq!(format!("{v:?}"), REDACTED);
-        assert_eq!(format!("{v}"), REDACTED);
+    fn secret_string_debug_redacts() {
+        let v = SecretString::from("hunter2");
+        assert_eq!(format!("{v:?}"), "SecretBox<str>([REDACTED])");
+        assert!(!format!("{v:?}").contains("hunter2"));
     }
 
     #[test]
     fn expose_returns_raw() {
-        let v = SecretValue::new("hunter2");
-        assert_eq!(v.expose(), "hunter2");
-        assert_eq!(v.len(), 7);
-        assert!(!v.is_empty());
+        let v = SecretString::from("hunter2");
+        assert_eq!(v.expose_secret(), "hunter2");
     }
 }

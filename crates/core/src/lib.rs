@@ -2,7 +2,7 @@
 //!
 //! Three things live here and nothing else:
 //! - [`Ref`]: the cross-backend addressing currency (`scheme://locus#field`)
-//! - [`SecretValue`]: a redaction-enforcing value wrapper
+//! - [`SecretString`]: secrecy's redaction + zeroize-on-drop value wrapper
 //! - the resource types every backend maps into ([`Secret`], [`SecretMeta`], [`Namespace`])
 //!
 //! Backends (cryptile-vaultwarden, future cryptile-op, cryptile-vault) depend on this
@@ -14,4 +14,5 @@ pub mod value;
 
 pub use model::{Namespace, Secret, SecretMeta, Session};
 pub use reference::{ParseRefError, Ref};
-pub use value::{Redaction, SecretValue};
+pub use secrecy::{ExposeSecret, SecretString};
+pub use value::Redaction;

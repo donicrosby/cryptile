@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::value::SecretValue;
+use crate::value::SecretString;
 
 /// A container of secrets (Bitwarden collection, 1Password vault, Vault mount).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,12 +35,12 @@ pub struct SecretMeta {
 pub struct Secret {
     pub meta: SecretMeta,
     /// Field name -> value. BTreeMap so iteration order is deterministic.
-    pub fields: BTreeMap<String, SecretValue>,
+    pub fields: BTreeMap<String, SecretString>,
 }
 
 impl Secret {
     /// Look up one field by the selector from a ref.
-    pub fn field(&self, name: &str) -> Option<&SecretValue> {
+    pub fn field(&self, name: &str) -> Option<&SecretString> {
         self.fields.get(name)
     }
 }
@@ -58,6 +58,7 @@ pub struct Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ExposeSecret;
 
     #[test]
     fn secret_debug_output_contains_no_values() {
@@ -69,13 +70,13 @@ mod tests {
                 fields: vec!["password".into(), "username".into()],
             },
             fields: BTreeMap::from([
-                ("password".into(), SecretValue::new("hunter2")),
-                ("username".into(), SecretValue::new("doni")),
+                ("password".into(), SecretString::from("hunter2")),
+                ("username".into(), SecretString::from("doni")),
             ]),
         };
         let dbg = format!("{sec:?}");
         assert!(!dbg.contains("hunter2") && !dbg.contains("doni"));
-        assert_eq!(sec.field("password").unwrap().expose(), "hunter2");
+        assert_eq!(sec.field("password").unwrap().expose_secret(), "hunter2");
         assert!(sec.field("totp").is_none());
     }
 }
