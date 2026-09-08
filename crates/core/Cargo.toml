@@ -9,3 +9,5 @@ repository.workspace = true
 
 [dependencies]
 secrecy.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true

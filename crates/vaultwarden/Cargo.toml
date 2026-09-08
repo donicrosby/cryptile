@@ -1,0 +1,33 @@
+[package]
+name = "cryptile-vaultwarden"
+description = "Vaultwarden/Bitwarden Provider for cryptile: password-grant auth, zero-knowledge crypto, sync mapping"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cryptile-core.workspace = true
+argon2.workspace = true
+pbkdf2.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+sha1.workspace = true
+aes.workspace = true
+cbc.workspace = true
+hmac.workspace = true
+rsa.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+base64.workspace = true
+rand_core.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
