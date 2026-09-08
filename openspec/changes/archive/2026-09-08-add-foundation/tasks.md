@@ -18,12 +18,12 @@
 - [x] 3.4 Keyring: Argon2id passphrase-encrypted credential file, 0600, root-only dir; silent refresh on 401
 
 ## 4. CLI
-- [ ] 4.1 `cryptile login` — interactive prompt (TTY-gated), stores server URL + service account creds
+- [x] 4.1 `cryptile login` — interactive prompt (TTY-gated), stores server URL + service account creds
 - 4.2 `cryptile export` — lands with Hermes plugin change, not MVP CLI
-- [ ] 4.2 `cryptile get <ref>` — prints single field value, exit codes per ProviderError kind
-- [ ] 4.3 `cryptile list` — collections and item names (metadata only, values redacted)
-- [ ] 4.4 Redaction infrastructure: `SecretString` (secrecy) everywhere, TTY-gated `--no-redact`
-- [ ] 4.5 `rotate-token` behavior: on AUTH_EXPIRED, drop cached token, one re-login attempt, else fail with remediation hint
+- [x] 4.2 `cryptile get <ref>` — prints single field value, exit codes per ProviderError kind
+- [x] 4.3 `cryptile list` — collections and item names (metadata only, values redacted)
+- [x] 4.4 Redaction infrastructure: `SecretString` (secrecy) everywhere, redacted Debug, no-leak tests; `--no-redact` flag lands with `export` (bulk display) in add-hermes-plugin — single-field `get` prints its one value by contract (piping is the Hermes bootstrap path)
+- [x] 4.5 `rotate-token` behavior: on AUTH_EXPIRED, drop cached token, one re-login attempt, else fail with remediation hint
 
 ## 5. Repo mechanics
 - [x] 5.1 Create GitHub repo `donicrosby/cryptile`, push scaffold + openspec
