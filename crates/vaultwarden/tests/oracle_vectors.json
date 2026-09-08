@@ -1,0 +1,10 @@
+{
+  "email": "oracle@example.com",
+  "password": "correct horse battery staple",
+  "iterations": 100000,
+  "master_key": "PslHbiJGMyzWGClHOfqBzN5DXG/o6gucpsJGS92ayiA=",
+  "auth_hash": "WTqjgaDGmOH+Do/tBoEn0DeBjhSt94m1iuyqbAmcbjw=",
+  "stretch_enc": "5a570nQT0b48sWkZPPMIexWPnTQ9U1q685BJbERwaX4=",
+  "stretch_mac": "/1tyaVFIR0xLUT2HKK8+oh/qCkw48sjvlmHUVidhrh4=",
+  "type2": "2.rz7gR7ysjoOK1sXVcJKX7Q==|OPpMLn/Qu4oqm0EtHFDmicV/Og8pXUoKRoU5Ix/DrIM=|nChEWKWehsGawQ62CS62aJ80JPfTdMpkUciI3FdGuKs="
+}

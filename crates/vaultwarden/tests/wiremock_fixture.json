@@ -1,0 +1,27 @@
+{
+  "email": "svc-hermes@oracle.test",
+  "password": "hunter2 but actually good",
+  "iterations": 10000,
+  "auth_hash": "bZfDNO8jkNFWNP5S1ncfqqojLIddcaaV0EYWvKEQkIc=",
+  "protected_user_key": "2.FXpwhSfsMMuIMxFZVSnGDg==|aFcbXgROMEwuuHHIynUCQVQNMJ66XwNJdbrAUROSl6vTVnl9C7zOI0AJLXZIKEY6gsckePj3qduKiIXH9hJg5Dus6RYq8n4rRAA9jiG7R6s=|ztp59asdaNhFkrGl3dYtsNKE+nx20DdiHJwEatdy7xw=",
+  "protected_private_key": "2.B73oPaEnjvawGxPxLXSV3A==|Y0eql+5+fQXqldRX/zl9w1CGk5yYynTodESQV9hKs0STqo24UAVjl4OQzamBWKNd4qKE8ml6F3RRu4jltGIU1AxJtpdVccFqSFefTIzTezTOF0Hykg/E71th37okP4lxJtQKu78qI96RDSnCrUp7eZIKE9D/R7G55vAhuFcxWCakPANllx1j+SlOu4KJy/FhmKfWAz4DdnPycmohIh4NBP2UOzVSiUCATKhhZ7TwRe41mmYQ9aVyxub0eaZnX231bqdQkbj6DCpZFjyu+xt7eMR6kl82qURuV5N6dbV+kEiIhmORQ1C7YAuR6iM+kpAEI0y8Fo/vv1VXVPb3+zI5dBWGkr0/eJY/YJ4cxkW0lQIlvPB15mxFLdvD25lzSNzqmm3jHXNTYzwHEIZIkH2KG7Mz1Ra4sFjamgJRw4T3e4xYMVvajNdDdwokRhNyfCCWgjPKn+sSyhGshaB/1ZmY40mfSYSq/m7PiCj1gPSYEWFrUr6FiLhAGI0qsCy1g2rf5peSxRPQkfeyagMkk2YtcqKp0QEK84r2ltX2PniheZEuppM1EwkhtEVkZglXxtYOSlP6NOMas2hfVG7K4ypFoyFZgmqNgvJ/u6s8Ixw0wdhQaP4ZnMwMNFi7MfUmr5wyHkTDb4GTZHzxueXyhGLy7i4IVKlLuyAQ1OVYMQpDUOoZ9IZrt12Qikpfr3D+gbOYoelOl5iIkgcJkM0w+3ezxphHQQKCAvWfIxziETU15fULoA43wXfm0UacvEJW4QE+tn+jIfKa1vXeHgcUD0tk+fHKXzb7jwSF9+8p9/1G8xF94lTjCAxJK0uXJmo8a6YPL6Tsjm6D3cJevf9PNw07Q0n3hkFoZsVozIomA0KDOKb8dKb7mCVxPDQIfC+AHbssWBzUO128LhtmomQ8/BsVxCykL1dk5Ho9tuZiTbz4cbogAIDqZwuAbkzfCG1Qyrj6I6/Na6V7iBfPF4Xsky2tb1pkoRwhnP5GLZ7qd5BYv6Q9c+Dup2HuaIeqOtXigJbcnbRbIP5xuqS2OrxHCg0SLZC4WwM+kZON/TfpSOX5vbc3ITWpBhNW2cbIFz65cj7RwQhZ3NkobV9sE1ciTm4UJMjtX2oK+yuWg9D6ExkAJbdjDkpYyjckEgTk1e6rvLEvyAHJa+dy4OmBKJinyuLDzF54obmVhuVKxTIXRzSOLq08yTgyxCAfj5IPEHeeLBUJ7X0wLHcxg0Pr7OK0DBATmIjEOrZUs8B1H1jimZ9kvBE5vpk0s4Zz2K4E0z+oX22YdlQLvC8U7cKhTkIXHPb5S5C6Ds1eD7XQN7A3ADhwScUVhuhTrSgzj5jN8bQE2AHwyj6w8Jor7dhV5grwZPcIfcfbM1D0jd1wNM/Qem1RcR7KpuUTYuagrqJ7TJeQSqN57ofhudd4GB9O7MmAacBKzhMbZ7td7iS5pIAoPJnOIh52GhqiFz9sKtgeKs6b3zBF3PR3U6eabaVAG9Fy+A4PzZPEl3V8zhQtO20jWlBIlNj9gaBYaCvJCaL/HyMsgmRHzQ9RS5/sEYaK4jMiTYdS893zGroIChXrxi+ftwwlBLa5H12cGIJuciUQulzF168XHc9antGBJPUK7/f7fvDN5ga7Rm1wv2xo2UDmDPv1Zyk=|UsJG5YUlzBU6mqwfN9ABdvODRP/bRCZ6jiSBgy09RiI=",
+  "org_key": "4.Ytlr8HbqBtV+8jf24TL1e78azLV0PG+N+LGt+73TeFviAPbgrCeAb1MUMF0GkjANti2UvDaksPnn3s48Ow26b2nFpic4t19ayVDRj+Jtwzq5WpwfzvAeIuxyvODJc5KoHLozDlQP3b7ucw/rp5J03zW5m8UKyYK3O59uA6iAVtVdGY4MEucQZyevbI3o/w3tiBB0HpEafc2Nm7s4do9bflg9MFGxMdquClyFYVN9AiejbnZTdU60BjQETe/xIm9rf+PVInstxdM6fRksvKRJG3oLsHEeZhT71kZx5G5mKmUuok2TiggE/UQscZnMLdKvqlkdZPtmPDRP3mHhaaRvyw==",
+  "personal": {
+    "name": "2.j3+Gli9V3G+kptoTnv+1Tg==|72e+R05bcNYQMlP4WR4t7w==|opYuRudWbI0TbI6los6rjP7NLUNjGbpIyKtNsJXtFCE=",
+    "password": "2.jGBohizPOW34ak6aM4gkkQ==|qVsdZABkzEOlmYAR24VrWA==|nOTwUL50rA12N0hSGLuIQfT4PtCAA7NCBQlto8Yfzfw=",
+    "id": "c1"
+  },
+  "org": {
+    "name": "2.1R3Alxyf2Y/I7WVewhommQ==|YOu22/Uc3MYgLcsv4gXBXw==|LH9XrELNJZouRKtTuHPOprwLhsy0I8xi9kHCrfXM40Y=",
+    "password": "2.QbIAVbI1cg96mM8dG1lBog==|cMTZNHRFu80kI5USbIvdoQ==|GQqvTxkc+W99QPxd/fwLGsvfJuapAaBFbZxd4JWcFJs=",
+    "id": "c2",
+    "collection": "coll-shared-uuid",
+    "org_id": "org-uuid",
+    "coll_name": "2.jZN6rZf1p8Nd+n92UdvD/A==|m9fk6IBNfKjugwOrRhxpjw==|nkCcZtCk89gPD1pQ5RR+CZI8JUPbLqzXiNngc1VY3pE="
+  },
+  "expect": {
+    "personal_item_password": "personal-secret",
+    "org_item_password": " hunter2-org",
+    "coll_name": "shared"
+  }
+}

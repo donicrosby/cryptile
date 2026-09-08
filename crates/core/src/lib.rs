@@ -9,10 +9,12 @@
 //! crate and never on each other. The Provider trait lands with the first backend.
 
 pub mod model;
+pub mod provider;
 pub mod reference;
 pub mod value;
 
 pub use model::{Namespace, Secret, SecretMeta, Session};
+pub use provider::{LoginParams, Provider, ProviderError};
 pub use reference::{ParseRefError, Ref};
 pub use secrecy::{ExposeSecret, SecretString};
 pub use value::Redaction;

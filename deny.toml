@@ -5,6 +5,14 @@
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # RUSTSEC-2023-0071 (Marvin Attack, rsa): unpatched upstream, no safe
+  # upgrade exists. Accepted for a scoped reason: cryptile uses rsa ONLY to
+  # unwrap the org key — one local decrypt against the user's own trusted
+  # server per sync; no attacker-controlled timing oracle at our boundary.
+  # Revisit when RustCrypto ships the constant-time rewrite.
+  "RUSTSEC-2023-0071",
+]
 
 [licenses]
 version = 2
@@ -18,6 +26,8 @@ allow = [
   "Unicode-3.0",
   "Unicode-DFS-2016",
   "Zlib",
+  # webpki-root-certs (reqwest/rustls root store) — permissive data license
+  "CDLA-Permissive-2.0",
 ]
 # GPLv3 deliberately excluded: cryptile must never link bitwarden-sdk or any
 # GPL crypto. Clean-room position documented in openspec/changes/add-foundation.
@@ -31,6 +41,5 @@ deny = []
 skip = []
 
 [sources]
-version = 2
 unknown-registry = "deny"
 unknown-git = "deny"
