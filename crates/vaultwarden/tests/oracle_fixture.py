@@ -76,10 +76,12 @@ def main():
     org_key_encstring = "4." + b64(wrapped)
 
     # Ciphers: one personal, one org item in collection "shared".
+    # Org notes carry a newline + backslash to pin export escaping.
     personal_name = enc2(user_enc, user_mac, b"personal-item")
     personal_pw = enc2(user_enc, user_mac, b"personal-secret")
     org_name = enc2(org_enc, org_mac, b"smtp")
     org_pw = enc2(org_enc, org_mac, b" hunter2-org")
+    org_notes = enc2(org_enc, org_mac, b"line1\nline2\\tail")
     coll_name = enc2(org_enc, org_mac, b"shared")
 
     fixture = {
@@ -98,6 +100,7 @@ def main():
         "org": {
             "name": org_name,
             "password": org_pw,
+            "notes": org_notes,
             "id": "c2",
             "collection": "coll-shared-uuid",
             "org_id": "org-uuid",
@@ -106,6 +109,7 @@ def main():
         "expect": {
             "personal_item_password": "personal-secret",
             "org_item_password": " hunter2-org",
+            "org_item_notes": "line1\nline2\\tail",
             "coll_name": "shared",
         },
     }

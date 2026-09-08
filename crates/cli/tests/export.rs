@@ -60,6 +60,7 @@ async fn mount_vw(server: &MockServer, fx: &serde_json::Value) {
                     "organizationId": fx["org"]["org_id"],
                     "collectionIds": [fx["org"]["collection"]],
                     "login": {"password": fx["org"]["password"]},
+                    "notes": fx["org"]["notes"],
                 },
             ],
         })))
@@ -131,6 +132,18 @@ async fn export_env_passphrase_end_to_end() {
         text.contains(&format!("PASSWORD={expected}")),
         "expected PASSWORD={expected} in:\n{text}"
     );
+    // newline + backslash escaping stays one line (task 1.4)
+    assert!(
+        text.contains("NOTES=line1\\nline2\\\\tail\n"),
+        "expected escaped NOTES line in:\n{text}"
+    );
+    // exactly one line per field: no raw newline inside a value
+    for line in text.lines() {
+        assert!(
+            line.starts_with(|c: char| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'),
+            "non-KEY line on stdout:\n{line}"
+        );
+    }
     // metadata lines never on stdout
     assert!(
         !text.contains("smtp"),

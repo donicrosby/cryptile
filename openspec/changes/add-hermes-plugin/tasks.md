@@ -4,7 +4,7 @@
 - [x] 1.1 `cryptile export --namespace <name>`: KEY=value lines on stdout, metadata never
 - [x] 1.2 `--format json`: `{"key": "value"}` object for programmatic consumers
 - [x] 1.3 Field-name mangling for env safety: uppercase, non-[A-Z0-9_] -> `_`, collisions get `__1` suffix, mapping printed to stderr
-- [ ] 1.4 Values with newlines/NUL escaped or refused (decide + test) — implemented (newlines escaped, NUL refused with exit 6) but NOT yet covered by a dedicated e2e test
+- [x] 1.4 Values with newlines/NUL escaped or refused (decide + test) — newlines escaped `\n`/`\\`, NUL refused with exit 6; pinned by fixture-backed e2e (multiline notes through the full crypto chain)
 - [x] 1.5 Refresh-retry semantics identical to get/list (4.5 pattern)
 
 ## 2. Non-interactive auth
