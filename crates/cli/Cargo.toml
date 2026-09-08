@@ -1,0 +1,16 @@
+[package]
+name = "cryptile"
+description = "One CLI, many secret backends: scoped machine access to Vaultwarden (and later 1Password, OpenBao) for agents and humans"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "cryptile"
+path = "src/main.rs"
+
+[dependencies]
+cryptile-core.workspace = true
+clap.workspace = true

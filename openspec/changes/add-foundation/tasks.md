@@ -1,0 +1,38 @@
+# Tasks — Foundation
+
+## 1. Workspace scaffold
+- [x] 1.1 Create Rust workspace: `crates/{cli,core,vaultwarden}` + root `Cargo.toml` with workspace deps
+- [x] 1.2 Add README (positioning vs BSM/Vaultwarden, tier 1+2 threat model), LICENSE (Apache-2.0), rustfmt.toml, clippy gate
+- [ ] 1.3 CI workflow: fmt + clippy + test on stable + MSRV, cargo-deny in audit mode
+- [x] 1.4 Zero-code start: no stub `main.rs` that compiles to nothing — first commit ships `Ref` parsing with tests
+
+## 2. Core: refs and model
+- [x] 2.1 `Ref` type: `scheme://locus[#field]` parse/display, default field `password`
+- [x] 2.2 Domain types: `Secret`, `SecretMeta`, `Namespace`, `Session`, `SecretValue` (redacting Debug/Display)
+- 2.3 `Provider` trait as designed — lands with first backend, not before (no speculative trait)
+
+## 3. Vaultwarden backend
+- [ ] 3.1 HTTP client: prelogin, KDF negotiation (Argon2id/PBKDF2), password grant login, token refresh
+- [ ] 3.2 Crypto: master key derivation, HKDF expand for user key, auth hash, RSA-OAEP org key unwrap, AES-CBC-HMAC cipher decryption, type-tagged value parsing
+- [ ] 3.3 Sync + mapping: `/api/sync` → ciphers filtered to target collection(s) → `Secret` field bags
+- [ ] 3.4 Keyring: Argon2id passphrase-encrypted credential file, 0600, root-only dir; silent refresh on 401
+
+## 4. CLI
+- [ ] 4.1 `cryptile login` — interactive prompt (TTY-gated), stores server URL + service account creds
+- 4.2 `cryptile export` — lands with Hermes plugin change, not MVP CLI
+- [ ] 4.2 `cryptile get <ref>` — prints single field value, exit codes per ProviderError kind
+- [ ] 4.3 `cryptile list` — collections and item names (metadata only, values redacted)
+- [ ] 4.4 Redaction infrastructure: `SecretValue` wrapper everywhere, TTY-gated `--no-redact`
+- [ ] 4.5 `rotate-token` behavior: on AUTH_EXPIRED, drop cached token, one re-login attempt, else fail with remediation hint
+
+## 5. Repo mechanics
+- [ ] 5.1 Create GitHub repo `donicrosby/cryptile`, push scaffold + openspec
+- [ ] 5.2 Verify `openspec validate add-foundation --strict` green before first push
+- [ ] 5.3 Commit discipline: one OpenSpec task cluster per commit, message references task ID
+- [ ] 5.4 After MVP lands: archive `add-foundation`, open next change (`add-hermes-plugin`)
+
+## 6. Deferred (explicitly out of MVP)
+- 6.1 1Password backend (`op://`) — facade ready, impl later
+- 6.2 OpenBao/Vault backend (`vault://`) — facade ready, impl later
+- 6.3 Write/rotate secrets via CLI
+- 6.4 TUI
