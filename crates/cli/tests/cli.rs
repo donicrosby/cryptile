@@ -71,7 +71,7 @@ fn get_with_state_but_no_tty_refuses_passphrase_prompt() {
         .assert()
         .failure()
         .code(3)
-        .stderr(contains("refusing to read keyring passphrase"));
+        .stderr(contains("no passphrase path"));
 }
 
 #[test]

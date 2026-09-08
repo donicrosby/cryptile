@@ -259,6 +259,45 @@ impl Provider for VaultwardenProvider {
         ok_metas(metas)
     }
 
+    async fn get_namespace_secrets(
+        &self,
+        s: &Session,
+        ns: &Namespace,
+    ) -> Result<Vec<Secret>, ProviderError> {
+        let sess: VwSession = parse_session(s)?;
+        let user_key = sess_user_key(&sess)?;
+        let (sync, org_keys, collections) =
+            self.sync_and_keys(&sess.access_token, &user_key).await?;
+        let coll_id: Option<String> = if ns.id.is_empty() {
+            Some(String::new())
+        } else {
+            resolve_collection(&ns.id, &collections)
+        };
+        let Some(coll_id) = coll_id else {
+            return Err(ProviderError::NotFound(format!("namespace {}", ns.id)));
+        };
+        let mut out = Vec::new();
+        for c in &sync.ciphers {
+            let belongs = match (&c.organization_id, coll_id.is_empty()) {
+                (None, true) => true,
+                (Some(_), true) => false,
+                (None, false) => false,
+                (Some(_), false) => c
+                    .collection_ids
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(&coll_id)),
+            };
+            if !belongs {
+                continue;
+            }
+            let key = key_for(&c.organization_id, &org_keys, &user_key);
+            if let Ok(sec) = map_cipher(c, key) {
+                out.push(sec);
+            }
+        }
+        Ok(out)
+    }
+
     async fn get_secret(&self, s: &Session, r: &Ref) -> Result<Secret, ProviderError> {
         if r.scheme != "vw" {
             return Err(ProviderError::BadRef(format!("not a vw ref: {r}")));

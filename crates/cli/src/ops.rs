@@ -17,6 +17,44 @@ fn map_retry(e: cryptile_core::ProviderError) -> String {
     }
 }
 
+/// `cryptile export --namespace N`: all values in a namespace. Returns the
+/// (possibly rotated) session alongside the secrets.
+pub async fn export(
+    provider: &VaultwardenProvider,
+    session: Session,
+    namespace: &str,
+) -> Result<(Session, Vec<Secret>), String> {
+    async fn export_once(
+        p: &VaultwardenProvider,
+        s: Session,
+        namespace: &str,
+    ) -> Result<(Session, Vec<Secret>), cryptile_core::ProviderError> {
+        let names = p.list_namespaces(&s).await?;
+        let target = names
+            .into_iter()
+            .find(|n| n.name.eq_ignore_ascii_case(namespace))
+            .ok_or_else(|| {
+                cryptile_core::ProviderError::NotFound(format!("namespace {namespace}"))
+            })?;
+        let secrets = p.get_namespace_secrets(&s, &target).await?;
+        Ok((s, secrets))
+    }
+    let (session, secrets) = match export_once(provider, session.clone(), namespace).await {
+        Ok(v) => v,
+        Err(cryptile_core::ProviderError::AuthExpired) => {
+            let fresh = provider
+                .refresh_session(&session)
+                .await
+                .map_err(|_| refresh_hint())?;
+            export_once(provider, fresh, namespace)
+                .await
+                .map_err(map_retry)?
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    Ok((session, secrets))
+}
+
 async fn get_once(
     p: &VaultwardenProvider,
     s: Session,

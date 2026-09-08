@@ -13,7 +13,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use cryptile_core::provider::Provider;
-use cryptile_core::{Keyring, Ref};
+use cryptile_core::{ExposeSecret, Keyring, Ref};
 use cryptile_vaultwarden::VaultwardenProvider;
 use secrecy::SecretString as SecStr;
 
@@ -48,6 +48,18 @@ enum Command {
     List {
         /// Namespace (collection) name; omit to list namespaces
         namespace: Option<String>,
+    },
+    /// Export all values in a namespace as KEY=value (or JSON)
+    Export {
+        /// Namespace (collection) name
+        #[arg(long)]
+        namespace: String,
+        /// Output format: env (default) or json
+        #[arg(long, default_value = "env")]
+        format: String,
+        /// Read the keyring passphrase from this env var (agent contexts)
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
     /// Validate a reference and show how it parses
     Parse { r#ref: String },
@@ -138,7 +150,7 @@ async fn main() -> ExitCode {
                 Ok(r) => r,
                 Err(e) => return die(format!("{e}"), 2),
             };
-            let (cfg, passphrase, session) = match load_state(&state) {
+            let (cfg, passphrase, session) = match load_state_for(&state, None) {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
@@ -156,7 +168,7 @@ async fn main() -> ExitCode {
             }
         }
         Command::List { namespace } => {
-            let (cfg, passphrase, session) = match load_state(&state) {
+            let (cfg, passphrase, session) = match load_state_for(&state, None) {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
@@ -175,21 +187,119 @@ async fn main() -> ExitCode {
                 Err(e) => die(e, 4),
             }
         }
+        Command::Export {
+            namespace,
+            format,
+            passphrase_env,
+        } => {
+            if format != "env" && format != "json" {
+                return die(format!("unknown format '{format}' (env|json)"), 2);
+            }
+            let (cfg, passphrase, session) = match load_state_for(&state, passphrase_env.as_deref())
+            {
+                Ok(v) => v,
+                Err(msg) => return die(msg, 3),
+            };
+            let provider = match VaultwardenProvider::new(&cfg.server) {
+                Ok(p) => p,
+                Err(e) => return die(e.to_string(), 2),
+            };
+            match ops::export(&provider, session, &namespace).await {
+                Ok((sess, secrets)) => {
+                    reseal(&state, &sess, &passphrase);
+                    match format.as_str() {
+                        "json" => {
+                            let mut obj = serde_json::Map::new();
+                            for s in &secrets {
+                                for (k, v) in &s.fields {
+                                    obj.insert(
+                                        k.clone(),
+                                        serde_json::Value::String(v.expose_secret().to_string()),
+                                    );
+                                }
+                            }
+                            println!("{}", serde_json::Value::Object(obj));
+                        }
+                        _ => {
+                            let mut mangling = Vec::new();
+                            let mut seen: std::collections::BTreeMap<String, String> =
+                                Default::default();
+                            for s in &secrets {
+                                for (k, v) in &s.fields {
+                                    let env_key = mangle_env_key(k, &mut seen);
+                                    if env_key != *k {
+                                        mangling.push(format!("{env_key} <- {k}"));
+                                    }
+                                    let val = v.expose_secret();
+                                    if val.contains('\0') {
+                                        return die(
+                                            format!("field '{k}' contains NUL; refusing to export"),
+                                            6,
+                                        );
+                                    }
+                                    println!("{env_key}={}", escape_env_value(val));
+                                }
+                            }
+                            for m in mangling {
+                                eprintln!("note: key mangled: {m}");
+                            }
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => die(e, 4),
+            }
+        }
     }
 }
 
-/// Load config + unseal session. Errors carry an exit-code-worthy message.
-fn load_state(state: &State) -> Result<(StateConfig, SecStr, cryptile_core::Session), String> {
+/// Mangle a field name to a unique env-safe key: uppercase, [A-Z0-9_], with
+/// collision suffixes. Emits nothing; the caller reports renames.
+fn mangle_env_key(name: &str, seen: &mut std::collections::BTreeMap<String, String>) -> String {
+    let base: String = name
+        .to_ascii_uppercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let mut candidate = base.clone();
+    let mut n = 0;
+    while seen.contains_key(&candidate) {
+        n += 1;
+        candidate = format!("{base}__{n}");
+    }
+    seen.insert(candidate.clone(), name.to_string());
+    candidate
+}
+
+/// Escape newlines and backslashes so one value stays one line.
+fn escape_env_value(v: &str) -> String {
+    v.replace('\\', "\\\\").replace('\n', "\\n")
+}
+
+/// Load state; passphrase from env var (agent) or TTY (human).
+fn load_state_for(
+    state: &State,
+    passphrase_env: Option<&str>,
+) -> Result<(StateConfig, SecStr, cryptile_core::Session), String> {
     if !state.logged_in() {
         return Err("not logged in; run `cryptile login`".into());
     }
     let cfg = state.load_config().map_err(|e| format!("config: {e}"))?;
-    if !std::io::stdin().is_terminal() {
-        return Err("refusing to read keyring passphrase from non-TTY stdin".into());
-    }
-    let passphrase = rpassword::prompt_password("keyring passphrase: ")
-        .map(SecStr::from)
-        .map_err(|e| e.to_string())?;
+    let passphrase = match passphrase_env {
+        Some(var) => {
+            let v = std::env::var(var)
+                .map_err(|_| format!("env var '{var}' (keyring passphrase) is not set"))?;
+            SecStr::from(v)
+        }
+        None => {
+            if !std::io::stdin().is_terminal() {
+                return Err("no passphrase path: pass --passphrase-env VAR or run on a TTY".into());
+            }
+            rpassword::prompt_password("keyring passphrase: ")
+                .map(SecStr::from)
+                .map_err(|e| e.to_string())?
+        }
+    };
     let session = state.load_session(&passphrase)?;
     Ok((cfg, passphrase, session))
 }

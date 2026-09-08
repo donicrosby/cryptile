@@ -51,6 +51,39 @@ pip install pre-commit && pre-commit install --hook-type commit-msg
 Commits follow [Conventional Commits](https://www.conventionalcommits.org),
 enforced by the commit-msg hook above.
 
+## Hermes integration (tier 2)
+
+Give an agent scoped, decrypt-capable access to exactly one collection
+without it ever seeing your master password:
+
+1. On the Vaultwarden server: org + collection (e.g. `hermes` / `shared`),
+   dedicated service account invited to that collection only. The ACL is the
+   real boundary — the account physically cannot sync anything else.
+2. On the agent host: `cryptile login --server ... --account ...` once,
+   with a keyring passphrase (agent contexts: keep it in the agent's `.env`
+   as the bootstrap credential).
+3. Hermes secret source (command type), runs at startup:
+
+```yaml
+secrets:
+  command:
+    - name: cryptile
+      command: cryptile export --namespace shared --passphrase-env CRYPTILE_PASSPHRASE
+      format: env
+```
+
+Values land in the agent process env (tier 2): available to tools, never in
+conversation. Rotating the service-account password does not invalidate the
+agent (refresh-token grant survives it).
+
+### Rotation runbook
+
+- Service-account password: rotate in VW, then `cryptile login` again on the
+  agent host. The keyring passphrase does not need to change.
+- Keyring passphrase: `cryptile export > /dev/null` to verify the current one,
+  then re-run `cryptile login` (fresh seal) with the new passphrase and update
+  `CRYPTILE_PASSPHRASE` in the agent `.env`.
+
 ## License
 
 Apache-2.0. No Bitwarden code, no `bitwarden-sdk` (GPLv3) — crypto implemented

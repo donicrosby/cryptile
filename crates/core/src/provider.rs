@@ -48,6 +48,14 @@ pub trait Provider: Send + Sync {
         s: &Session,
         ns: &Namespace,
     ) -> Result<Vec<SecretMeta>, ProviderError>;
+
+    /// Full values for every item in a namespace (export path). Backends
+    /// SHOULD implement this as one round trip, not N `get_secret` calls.
+    async fn get_namespace_secrets(
+        &self,
+        s: &Session,
+        ns: &Namespace,
+    ) -> Result<Vec<Secret>, ProviderError>;
     async fn get_secret(&self, s: &Session, r: &Ref) -> Result<Secret, ProviderError>;
 }
 
