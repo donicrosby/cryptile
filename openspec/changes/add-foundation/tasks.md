@@ -3,7 +3,7 @@
 ## 1. Workspace scaffold
 - [x] 1.1 Create Rust workspace: `crates/{cli,core,vaultwarden}` + root `Cargo.toml` with workspace deps
 - [x] 1.2 Add README (positioning vs BSM/Vaultwarden, tier 1+2 threat model), LICENSE (Apache-2.0), rustfmt.toml, clippy gate
-- [ ] 1.3 CI workflow: fmt + clippy + test on stable; cargo-deny (advisories, yanked, licenses, sources)
+- [x] 1.3 CI workflow: fmt + clippy + test on stable; cargo-deny (advisories, yanked, licenses, sources)
 - [x] 1.4 Zero-code start: no stub `main.rs` that compiles to nothing — first commit ships `Ref` parsing with tests
 
 ## 2. Core: refs and model

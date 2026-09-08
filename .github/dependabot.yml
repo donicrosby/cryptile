@@ -1,0 +1,17 @@
+# Dependabot enforces the dependency-freshness policy from
+# openspec/changes/add-foundation/design.md: stay within one major version of
+# latest (one minor while the major is 0). Cargo updates land as PRs that CI
+# (clippy + tests + cargo-deny) must approve.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
