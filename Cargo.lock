@@ -430,9 +430,18 @@ dependencies = [
 name = "cryptile-core"
 version = "0.1.0"
 dependencies = [
+ "aes",
+ "argon2",
  "async-trait",
+ "base64 0.23.1",
+ "cbc",
+ "hmac",
+ "rand_core 0.9.5",
  "secrecy",
+ "sha2",
+ "subtle",
  "thiserror",
+ "zeroize",
 ]
 
 [[package]]

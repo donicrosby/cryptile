@@ -11,3 +11,13 @@ repository.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
+# keyring seal: Argon2id -> AES-256-CBC + HMAC-SHA256 (encrypt-then-MAC)
+argon2.workspace = true
+aes.workspace = true
+cbc.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+base64.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
+rand_core.workspace = true

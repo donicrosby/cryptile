@@ -26,9 +26,9 @@
 - [ ] 4.5 `rotate-token` behavior: on AUTH_EXPIRED, drop cached token, one re-login attempt, else fail with remediation hint
 
 ## 5. Repo mechanics
-- [ ] 5.1 Create GitHub repo `donicrosby/cryptile`, push scaffold + openspec
-- [ ] 5.2 Verify `openspec validate add-foundation --strict` green before first push
-- [ ] 5.3 Commit discipline: Conventional Commits format, one OpenSpec task cluster per commit, message references task ID; enforced by pre-commit (`compilerla/conventional-pre-commit`, `.pre-commit-config.yaml`)
+- [x] 5.1 Create GitHub repo `donicrosby/cryptile`, push scaffold + openspec
+- [x] 5.2 Verify `openspec validate add-foundation --strict` green before first push
+- [x] 5.3 Commit discipline: Conventional Commits format, one OpenSpec task cluster per commit, message references task ID; enforced by pre-commit (`compilerla/conventional-pre-commit`, `.pre-commit-config.yaml`)
 - [ ] 5.4 After MVP lands: archive `add-foundation`, open next change (`add-hermes-plugin`)
 
 ## 6. Deferred (explicitly out of MVP)
