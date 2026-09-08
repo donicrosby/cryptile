@@ -1,0 +1,9 @@
+# Conventional Commits enforcement (task 5.3).
+# One-time setup per clone: pip install pre-commit && pre-commit install --hook-type commit-msg
+# DEFAULT_TYPES already covers feat/fix/build/chore/ci/docs/perf/refactor/revert/style/test.
+repos:
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]

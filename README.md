@@ -41,8 +41,19 @@ Vaultwarden backend is under active development — see `openspec/changes/`.
 Spec-driven: every feature lands as an OpenSpec change proposal before code.
 `openspec/` in this repo is the source of truth for what cryptile is becoming.
 
+## Development
+
+```sh
+cargo test --workspace
+pip install pre-commit && pre-commit install --hook-type commit-msg
+```
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org),
+enforced by the commit-msg hook above.
+
 ## License
 
 Apache-2.0. No Bitwarden code, no `bitwarden-sdk` (GPLv3) — crypto implemented
-from the public Bitwarden security whitepaper and `bitwarden/specs`, the same
-clean-room position Vaultwarden itself took.
+from the public Bitwarden security whitepaper, cross-checked against
+independent MIT-licensed clients (rbw, goldwarden). Same clean-room
+position Vaultwarden itself took.

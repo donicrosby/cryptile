@@ -28,7 +28,7 @@
 ## 5. Repo mechanics
 - [ ] 5.1 Create GitHub repo `donicrosby/cryptile`, push scaffold + openspec
 - [ ] 5.2 Verify `openspec validate add-foundation --strict` green before first push
-- [ ] 5.3 Commit discipline: one OpenSpec task cluster per commit, message references task ID
+- [ ] 5.3 Commit discipline: Conventional Commits format, one OpenSpec task cluster per commit, message references task ID; enforced by pre-commit (`compilerla/conventional-pre-commit`, `.pre-commit-config.yaml`)
 - [ ] 5.4 After MVP lands: archive `add-foundation`, open next change (`add-hermes-plugin`)
 
 ## 6. Deferred (explicitly out of MVP)
