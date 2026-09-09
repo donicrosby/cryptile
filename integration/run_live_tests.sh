@@ -201,6 +201,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+echo "== bench stage =="
+if [ "${SKIP_BENCH:-0}" = "1" ]; then
+    echo "SKIP: bench stage (SKIP_BENCH=1)"
+else
+    BENCH_LOG="$(mktemp)"
+    if CRYPTILE_STATE_DIR="$STATE_DIR" CRYPTILE_PASSPHRASE="$PASSPHRASE" \
+       CRYPTILE_LIVE_SUMMARY="$SUMMARY" CRYPTILE_LIVE_BASE="$BASE_URL" \
+       python3 "$REPO/integration/bench_stage.py" | tee "$BENCH_LOG"; then
+        :
+    else
+        echo "(bench stage exited nonzero; failures listed above)"
+    fi
+    BENCH_P="$(grep -c '^PASS:' "$BENCH_LOG" || true)"
+    BENCH_F="$(grep -c '^FAIL:' "$BENCH_LOG" || true)"
+    PASS_COUNT=$((PASS_COUNT + BENCH_P))
+    FAIL_COUNT=$((FAIL_COUNT + BENCH_F))
+    rm -f "$BENCH_LOG"
+fi
+
+# ---------------------------------------------------------------------------
 echo
 echo "results: $PASS_COUNT passed, $FAIL_COUNT failed"
 exit "$FAIL_COUNT"
