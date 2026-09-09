@@ -39,6 +39,12 @@ enum Command {
         /// Account email
         #[arg(long)]
         account: String,
+        /// Read the keyring passphrase from this env var (agent contexts)
+        #[arg(long)]
+        passphrase_env: Option<String>,
+        /// Read the master password from this env var (agent contexts)
+        #[arg(long)]
+        master_password_env: Option<String>,
     },
     /// Print one secret field value (vw://collection/item#field)
     Get { r#ref: String },
@@ -68,6 +74,19 @@ enum Command {
 fn die(msg: String, code: u8) -> ExitCode {
     eprintln!("error: {msg}");
     ExitCode::from(code)
+}
+
+/// Derive exit code from the typed provider error:
+/// 2 usage/bad ref, 3 auth/state, 4 transport/server/crypto, 5 not found.
+fn die_provider(e: cryptile_core::ProviderError) -> ExitCode {
+    use cryptile_core::ProviderError::*;
+    let code = match e {
+        BadRef(_) => 2,
+        Auth(_) | AuthExpired | NoSession | Forbidden(_) => 3,
+        Transport(_) | Server(_) | Crypto(_) => 4,
+        NotFound(_) => 5,
+    };
+    die(e.to_string(), code)
 }
 
 fn read_passphrase(prompt: &str) -> Result<SecStr, String> {
@@ -113,14 +132,38 @@ async fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Command::Login { server, account } => {
-            let passphrase = match read_passphrase("keyring passphrase: ") {
-                Ok(p) => p,
-                Err(e) => return die(e, 2),
+        Command::Login {
+            server,
+            account,
+            passphrase_env,
+            master_password_env,
+        } => {
+            let passphrase = match passphrase_env {
+                Some(var) => match std::env::var(&var) {
+                    Ok(v) => SecStr::from(v),
+                    Err(_) => {
+                        return die(
+                            format!("env var '{var}' (keyring passphrase) is not set"),
+                            2,
+                        )
+                    }
+                },
+                None => match read_passphrase("keyring passphrase: ") {
+                    Ok(p) => p,
+                    Err(e) => return die(e, 2),
+                },
             };
-            let secret = match read_secret("master password: ") {
-                Ok(p) => p,
-                Err(e) => return die(e, 2),
+            let secret = match master_password_env {
+                Some(var) => match std::env::var(&var) {
+                    Ok(v) => SecStr::from(v),
+                    Err(_) => {
+                        return die(format!("env var '{var}' (master password) is not set"), 2)
+                    }
+                },
+                None => match read_secret("master password: ") {
+                    Ok(p) => p,
+                    Err(e) => return die(e, 2),
+                },
             };
             let provider = match registry::open("vw", Some(&server)) {
                 Ok(p) => p,
@@ -134,7 +177,7 @@ async fn main() -> ExitCode {
                 .await
             {
                 Ok(s) => s,
-                Err(e) => return die(e.to_string(), 4),
+                Err(e) => return die_provider(e),
             };
             let cfg = StateConfig { server, account };
             if let Err(e) = state.save_login(&cfg, &session.handle, &passphrase) {
@@ -162,7 +205,7 @@ async fn main() -> ExitCode {
                     println!("{value}");
                     ExitCode::SUCCESS
                 }
-                Err(e) => die(e, 4),
+                Err(e) => die_provider(e),
             }
         }
         Command::List { namespace } => {
@@ -182,7 +225,7 @@ async fn main() -> ExitCode {
                     }
                     ExitCode::SUCCESS
                 }
-                Err(e) => die(e, 4),
+                Err(e) => die_provider(e),
             }
         }
         Command::Export {
@@ -245,7 +288,7 @@ async fn main() -> ExitCode {
                     }
                     ExitCode::SUCCESS
                 }
-                Err(e) => die(e, 4),
+                Err(e) => die_provider(e),
             }
         }
     }

@@ -49,7 +49,7 @@ pub struct TokenResponse {
     pub refresh_token: Option<String>,
     #[serde(default = "default_expires_in")]
     pub expires_in: u64,
-    #[serde(default)]
+    #[serde(default, alias = "Key")]
     pub key: String,
     #[serde(default, alias = "Kdf")]
     pub kdf: Option<u8>,
@@ -137,14 +137,19 @@ impl Client {
         serde_json::from_str(&body).map_err(|e| ApiError::Malformed(e.to_string()))
     }
 
-    /// Prelogin: fetch per-account KDF parameters.
+    /// Prelogin: fetch per-account KDF parameters. JSON body: both VW and
+    /// upstream expect `{"email": ...}`; VW's Rocket rejects form-encoded
+    /// prelogin with a bare 400.
     pub async fn prelogin(&self, email: &str) -> Result<PreloginResponse, ApiError> {
-        self.post_form(
-            &format!("{}/accounts/prelogin", self.identity_url),
-            "prelogin",
-            &[("email", email)],
-        )
-        .await
+        let resp = self
+            .http
+            .post(format!("{}/accounts/prelogin", self.identity_url))
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({ "email": email }))
+            .send()
+            .await
+            .map_err(|e| ApiError::Transport(e.to_string()))?;
+        Self::parse(resp, "prelogin").await
     }
 
     /// Password grant. `password` is the base64 auth hash, never plaintext.

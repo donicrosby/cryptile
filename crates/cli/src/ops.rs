@@ -1,18 +1,25 @@
 //! Provider ops with 4.5 refresh semantics: on AuthExpired, refresh once
 //! via the session's refresh token and retry once. No loops, one hint.
+//!
+//! Errors stay typed (`ProviderError`) all the way to main so exit codes
+//! are derived from the error kind, not stringified soup.
 
 use cryptile_core::provider::Provider;
 use cryptile_core::{ExposeSecret, Namespace, Ref, Secret, SecretMeta, Session};
 
-fn refresh_hint() -> String {
-    "session expired and refresh failed; run `cryptile login` to re-establish".into()
+const HINT: &str = "session expired and refresh failed; run `cryptile login` to re-establish";
+
+fn refresh_hint() -> cryptile_core::ProviderError {
+    cryptile_core::ProviderError::Auth(HINT.to_string())
 }
 
-fn map_retry(e: cryptile_core::ProviderError) -> String {
+/// After one refresh + retry still hit AuthExpired: surface the hint,
+/// otherwise pass the typed error through unchanged.
+fn map_retry(e: cryptile_core::ProviderError) -> cryptile_core::ProviderError {
     if matches!(e, cryptile_core::ProviderError::AuthExpired) {
         refresh_hint()
     } else {
-        e.to_string()
+        e
     }
 }
 
@@ -50,7 +57,7 @@ pub async fn export(
     provider: &dyn Provider,
     session: Session,
     namespace: &str,
-) -> Result<(Session, Vec<Secret>), String> {
+) -> Result<(Session, Vec<Secret>), cryptile_core::ProviderError> {
     async fn export_once(
         p: &dyn Provider,
         s: Session,
@@ -78,7 +85,7 @@ pub async fn export(
                     .await
                     .map_err(map_retry)?
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e),
         };
     Ok((session, secrets))
 }
@@ -121,7 +128,7 @@ pub async fn get(
     provider: &dyn Provider,
     session: Session,
     r: &Ref,
-) -> Result<(Session, String), String> {
+) -> Result<(Session, String), cryptile_core::ProviderError> {
     let (session, secret) =
         match get_once(provider, ensure_fresh(provider, &session).await, r).await {
             Ok(v) => v,
@@ -132,11 +139,14 @@ pub async fn get(
                     .map_err(|_| refresh_hint())?;
                 get_once(provider, fresh, r).await.map_err(map_retry)?
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e),
         };
-    let field = secret
-        .field(&r.field)
-        .ok_or_else(|| format!("field '{}' not present on {}", r.field, r.locus))?;
+    let field = secret.field(&r.field).ok_or_else(|| {
+        cryptile_core::ProviderError::NotFound(format!(
+            "field '{}' not present on {}",
+            r.field, r.locus
+        ))
+    })?;
     Ok((session, field.expose_secret().to_string()))
 }
 
@@ -145,7 +155,7 @@ pub async fn list(
     provider: &dyn Provider,
     session: Session,
     namespace: Option<String>,
-) -> Result<(Session, Vec<String>), String> {
+) -> Result<(Session, Vec<String>), cryptile_core::ProviderError> {
     let Some(ns) = namespace else {
         let (session, names) =
             match list_ns_once(provider, ensure_fresh(provider, &session).await).await {
@@ -157,7 +167,7 @@ pub async fn list(
                         .map_err(|_| refresh_hint())?;
                     list_ns_once(provider, fresh).await.map_err(map_retry)?
                 }
-                Err(e) => return Err(e.to_string()),
+                Err(e) => return Err(e),
             };
         return Ok((session, names.into_iter().map(|n| n.name).collect()));
     };
@@ -174,7 +184,7 @@ pub async fn list(
                     .await
                     .map_err(map_retry)?
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e),
         };
     Ok((session, metas.into_iter().map(|m| m.name).collect()))
 }
