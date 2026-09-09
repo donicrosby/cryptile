@@ -41,6 +41,21 @@ Vaultwarden backend is under active development — see `openspec/changes/`.
 Spec-driven: every feature lands as an OpenSpec change proposal before code.
 `openspec/` in this repo is the source of truth for what cryptile is becoming.
 
+## Field names by item type
+
+`vw://collection/item#field` — every item type maps into one flat field bag.
+`#password` is the default field when a ref names none. Names are stable;
+custom fields join the bag under their own (decrypted) name.
+
+| Item type | Fields |
+|---|---|
+| Login | `username`, `password`, `totp`, `uri`, `uris` (newline-joined when >1) |
+| Secure Note | `notes` |
+| Card | `cardholder_name`, `brand`, `number`, `exp_month`, `exp_year`, `code` |
+| Identity | `title`, `first_name`, `middle_name`, `last_name`, `address1`–`address3`, `city`, `state`, `postal_code`, `country`, `company`, `email`, `phone`, `ssn`, `username`, `passport_number`, `license_number` |
+| SSH Key | `private_key`, `public_key`, `key_fingerprint` |
+| any | `notes`, custom fields |
+
 ## Development
 
 ```sh

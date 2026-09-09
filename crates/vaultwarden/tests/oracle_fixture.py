@@ -87,6 +87,37 @@ def main():
     org_notes = enc2(org_enc, org_mac, b"line1\nline2\\tail")
     coll_name = enc2(org_enc, org_mac, b"shared")
 
+    # One item per remaining cipher type, all org-owned in "shared".
+    note_name = enc2(org_enc, org_mac, b"lease-key")
+    note_notes = enc2(org_enc, org_mac, b"ssh-ed25519 AAAAC3... lease@node")
+
+    card_name = enc2(org_enc, org_mac, b"corp-card")
+    cardholder = enc2(org_enc, org_mac, b"Doni Crosby")
+    card_brand = enc2(org_enc, org_mac, b"visa")
+    card_number = enc2(org_enc, org_mac, b"4024007138346631")
+    card_exp_month = enc2(org_enc, org_mac, b"12")
+    card_exp_year = enc2(org_enc, org_mac, b"2030")
+    card_code = enc2(org_enc, org_mac, b"417")
+
+    id_name = enc2(org_enc, org_mac, b"passport")
+    id_title = enc2(org_enc, org_mac, b"Mr")
+    id_first = enc2(org_enc, org_mac, b"Doni")
+    id_last = enc2(org_enc, org_mac, b"Crosby")
+    id_passport = enc2(org_enc, org_mac, b"P1234567")
+    id_ssn = enc2(org_enc, org_mac, b"123-45-6789")
+
+    ssh_name = enc2(org_enc, org_mac, b"bootstrap-node")
+    ssh_priv = enc2(org_enc, org_mac, b"-----BEGIN OPENSSH PRIVATE KEY-----\n...")
+    ssh_pub = enc2(org_enc, org_mac, b"ssh-ed25519 AAAAC3Nz... bootstrap")
+    ssh_fp = enc2(org_enc, org_mac, b"SHA256:abc123")
+
+    # Login with a multi-uri array to pin the uris mapping.
+    multi_name = enc2(org_enc, org_mac, b"multi-uri")
+    multi_pw = enc2(org_enc, org_mac, b"multi-secret")
+    multi_u1 = enc2(org_enc, org_mac, b"https://a.example.com")
+    multi_u2 = enc2(org_enc, org_mac, b"https://b.example.com")
+    multi_u3 = enc2(org_enc, org_mac, b"https://c.example.com")
+
     fixture = {
         "email": email,
         "password": password,
@@ -109,11 +140,58 @@ def main():
             "org_id": "org-uuid",
             "coll_name": coll_name,
         },
+        "note": {
+            "name": note_name,
+            "notes": note_notes,
+            "id": "c3",
+        },
+        "card": {
+            "name": card_name,
+            "cardholder_name": cardholder,
+            "brand": card_brand,
+            "number": card_number,
+            "exp_month": card_exp_month,
+            "exp_year": card_exp_year,
+            "code": card_code,
+            "id": "c4",
+        },
+        "identity": {
+            "name": id_name,
+            "title": id_title,
+            "first_name": id_first,
+            "last_name": id_last,
+            "passport_number": id_passport,
+            "ssn": id_ssn,
+            "id": "c5",
+        },
+        "sshkey": {
+            "name": ssh_name,
+            "private_key": ssh_priv,
+            "public_key": ssh_pub,
+            "key_fingerprint": ssh_fp,
+            "id": "c6",
+        },
+        "multiuri": {
+            "name": multi_name,
+            "password": multi_pw,
+            "uris": [multi_u1, multi_u2, multi_u3],
+            "id": "c7",
+        },
         "expect": {
             "personal_item_password": "personal-secret",
             "org_item_password": " hunter2-org",
             "org_item_notes": "line1\nline2\\tail",
             "coll_name": "shared",
+            "note_notes": "ssh-ed25519 AAAAC3... lease@node",
+            "card_number": "4024007138346631",
+            "card_code": "417",
+            "identity_passport_number": "P1234567",
+            "identity_ssn": "123-45-6789",
+            "sshkey_private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
+            "sshkey_public_key": "ssh-ed25519 AAAAC3Nz... bootstrap",
+            "sshkey_key_fingerprint": "SHA256:abc123",
+            "multiuri_uri": "https://a.example.com",
+            "multiuri_uris": "https://a.example.com\nhttps://b.example.com\nhttps://c.example.com",
         },
     }
     d = os.path.dirname(os.path.abspath(__file__))

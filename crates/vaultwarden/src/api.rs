@@ -309,7 +309,14 @@ pub struct Cipher {
     pub organization_id: Option<String>,
     #[serde(default)]
     pub collection_ids: Option<Vec<String>>,
+    #[serde(default)]
     pub login: Option<LoginData>,
+    #[serde(default)]
+    pub card: Option<CardData>,
+    #[serde(default)]
+    pub identity: Option<IdentityData>,
+    #[serde(rename = "sshKey", default)]
+    pub ssh_key: Option<SshKeyData>,
     pub notes: Option<String>,
     #[serde(default)]
     pub fields: Vec<Field>,
@@ -321,7 +328,57 @@ pub struct LoginData {
     pub username: Option<String>,
     pub password: Option<String>,
     pub totp: Option<String>,
+    /// The API emits a `uris` array (singular `uri` is not a real shape).
+    #[serde(default)]
+    pub uris: Vec<LoginUri>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginUri {
     pub uri: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardData {
+    pub cardholder_name: Option<String>,
+    pub brand: Option<String>,
+    pub number: Option<String>,
+    pub exp_month: Option<String>,
+    pub exp_year: Option<String>,
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityData {
+    pub title: Option<String>,
+    pub first_name: Option<String>,
+    pub middle_name: Option<String>,
+    pub last_name: Option<String>,
+    pub address1: Option<String>,
+    pub address2: Option<String>,
+    pub address3: Option<String>,
+    pub city: Option<String>,
+    pub state: Option<String>,
+    pub postal_code: Option<String>,
+    pub country: Option<String>,
+    pub company: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub ssn: Option<String>,
+    pub username: Option<String>,
+    pub passport_number: Option<String>,
+    pub license_number: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshKeyData {
+    pub private_key: Option<String>,
+    pub public_key: Option<String>,
+    pub key_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
