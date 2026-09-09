@@ -1,32 +1,97 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Project: cryptile — scoped machine access to secret backends (Vaultwarden
+  first; 1Password/OpenBao later) + Hermes Agent SecretSource integration.
+  Repo /workspace/cryptile → github.com/donicrosby/cryptile (public,
+  Apache-2.0, main, branch protection requires [check, deny], strict).
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Tech stack:
+  - Rust workspace: crates/core (cryptile-core), crates/cli (package name
+    `cryptile`, bin `cryptile`), crates/vaultwarden (backend). Python for
+    Hermes plugin + integration harness.
+  - Crypto: RustCrypto crates ONLY, never hand-rolled. secrecy::SecretString
+    for all secret material. Argon2id t=3/m=64MiB/p=4 keyring KDF,
+    AES-256-CBC + HMAC encrypt-then-MAC.
+  - tokio current_thread (workspace lacks rt-multi-thread), reqwest, serde.
+  - Hermes plugin: integrations/hermes (plugin.yaml + __init__.py),
+    CryptileSource, scheme "vw", exit-code→ErrorKind map 2/3/4/5 →
+    REF_INVALID/AUTH_FAILED/NETWORK/EMPTY_VALUE.
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  Architecture invariants (do not violate in changes):
+  - Provider trait (async, object-safe) lives in core; backend crates depend
+    on core ONLY; CLI holds Box<dyn Provider> via crates/cli/src/registry.rs
+    (composition root — sole importer of backend crates). CLI code must never
+    name a backend concrete type.
+  - Secrets are typed (SecretString/ExposeSecret), never plain String.
+  - Tiers 1+2 only (dedicated VW service account, org "hermes", collection
+    "shared"). Tier 3 broker is out of scope permanently unless user asks.
+
+  Clean-room constraints:
+  - NO bitwarden_license code, NO bitwarden-sdk (GPL), NO Vaultwarden AGPL
+    implementation code. Endpoint response *shapes* are OK. Gold sources:
+    Bitwarden security whitepaper, rbw (MIT, /tmp/rbw), goldwarden (MIT Go,
+    /tmp/gw). VW protocol verified byte-level in
+    crates/vaultwarden/tests/ via Python oracle.
+
+  Dependency policy:
+  - Ecosystem crates over in-house; within one major latest (one minor at
+    0.x). cargo-deny gates advisories/yanked/licenses/sources. GPL excluded;
+    CDLA-Permissive-2.0 allowed; RUSTSEC-2023-0071 (rsa Marvin) scoped
+    ignore, sign-off pending — do not silently widen.
+
+  Version policy (user-set): stay 0.1.0 pre-alpha. No crates.io publish, no
+  version bumps until battle-tested.
+
+  CLI contract (authoritative, tests pin it):
+  - Exit codes: 0 ok; 2 usage/ref-parse; 3 state/passphrase/wrong master
+    password/no session; 4 transport/backend; 5 not-found.
+  - Ref scheme: vw://<collection>/<item>#<field>. State in
+    ~/.config/cryptile (config.json + sealed keyring, 0600/0700).
+  - Machine path: get/list/login/export accept --passphrase-env VAR;
+    TTY-gated prompts otherwise.
+
+  Testing:
+  - CI runs wiremock + cargo workspace + python plugin tests (pytest.ini
+    basetemp .pytest-tmp/ — /tmp is noexec in dev sandboxes) + real Hermes
+    conformance kit (needs $HERMES_REPO checkout, skips without).
+  - Live harness: integration/run_live_tests.sh, gated behind
+    CRYPTILE_VW_BIND / CRYPTILE_LIVE_BASE env flags; VW 1.37.2 in Docker.
+  - wiremock matches method+path only — it does NOT validate crypto shapes;
+    protocol-level bugs are caught only by the live harness.
+
+  Tooling gotchas (learned the hard way):
+  - openspec 1.11.0: no `change add` subcommand — scaffold by hand. Archive
+    with `openspec archive <name> --yes` WITHOUT --skip-specs when deltas
+    exist; MODIFIED delta referencing a nonexistent header fails validation
+    (rewrite as ADDED requirement).
+  - git push needs -c credential.helper='!gh auth git-credential'.
+  - RustCrypto 0.13-era: aes 0.9 cbc 0.2 BlockMode{Decrypt,Encrypt}/KeyIvInit,
+    hmac SimpleHmac, sha2 0.11 pkcs8 0.13 der 0.8; verify against real /tmp
+    fixture files, not process substitution.
+  - write_file corrupts files ≥ ~10-12KB — for large files use terminal
+    heredoc or split writes.
+
+  Workflow: OpenSpec for ALL changes (no drive-by commits). Conventional
+  commits enforced by pre-commit (compilerla/conventional-pre-commit).
+  User never wants bluffing: "I don't know" beats a guess.
+
+rules:
+  proposal:
+    - Always include a "Non-goals" section.
+    - Keep the delta vs existing specs explicit (what capability changes).
+  design:
+    - List alternatives considered and why they were discarded.
+    - Respect the architecture invariants in context above; call out any
+      change that touches them explicitly.
+  tasks:
+    - Every task must be independently verifiable (command, test, or gate).
+    - Final task is always: commit (conventional), push, CI green, archive.
+
+operations:
+  archive:
+    guidance:
+      - Run `openspec validate <change> --strict` before archiving.
+      - Real spec deltas archive WITHOUT --skip-specs; only use --skip-specs
+        when a change genuinely has no delta.
+      - After archive: commit the archive move, push, watch CI to green.
