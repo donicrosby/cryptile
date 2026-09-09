@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! cryptile-core — backend-agnostic domain model for cryptile.
 //!
 //! Three things live here and nothing else:

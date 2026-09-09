@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! HTTP client for the Bitwarden/Vaultwarden identity + API endpoints.
 //! Transport only — no crypto here, no secrets in logs.
 

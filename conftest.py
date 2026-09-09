@@ -1,3 +1,5 @@
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 """Pytest bootstrap: put the hermes-agent checkout on sys.path BEFORE the
 cryptile plugin package (integrations/hermes/) is imported, so
 `agent.secret_sources.base` resolves. Tests needing the Hermes runtime are

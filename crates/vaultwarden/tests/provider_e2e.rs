@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! End-to-end provider test against a wiremock VW: real crypto chain from
 //! fixture (Python oracle), mock transport. Proves KDF → auth hash → token →
 //! user-key unwrap → private-key unwrap → org-key unwrap → cipher decrypt

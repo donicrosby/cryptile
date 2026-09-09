@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 """Independent crypto oracle: generates test vectors via Python `cryptography`
 + hashlib (independent of the RustCrypto chain). Rust tests consume them."""
 import base64

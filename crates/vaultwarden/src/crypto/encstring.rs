@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! EncString parsing and decryption (whitepaper + rbw/goldwarden agreement).
 
 use base64::engine::general_purpose::STANDARD as B64;

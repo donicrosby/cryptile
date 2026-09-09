@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! CLI boundary tests: refs, login state gating, non-TTY refusals.
 //! Full get/list e2e needs a TTY for the keyring passphrase (by design);
 //! the boundary itself is what these tests pin down.

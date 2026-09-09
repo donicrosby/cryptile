@@ -1,3 +1,5 @@
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 """Cryptile secret source for Hermes.
 
 Bridges Hermes' secret-source contract to the `cryptile` CLI: each

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 """Vaultwarden bootstrap for the cryptile live integration harness.
 
 Implements the client side of the Bitwarden protocol (KDF, auth hash,

@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! `VaultwardenProvider`: the Provider facade over api + crypto.
 
 use async_trait::async_trait;

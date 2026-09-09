@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Passphrase-sealed keyring: on-disk session persistence.
 //!
 //! Stores a backend session (serialized JSON, opaque to core) sealed with

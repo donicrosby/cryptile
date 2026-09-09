@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Backend registry = the CLI's composition root. Backend crates are linked
 //! HERE and nowhere else: ops/main speak `dyn Provider` only, dispatching on
 //! ref scheme. Adding a backend = one match arm here plus its crate dep.

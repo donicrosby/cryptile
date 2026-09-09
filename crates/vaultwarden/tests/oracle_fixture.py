@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 """Full-fixture oracle: builds a complete VW login+sync scenario with real
 crypto (Python cryptography lib) for the Rust wiremock integration test.
 The Rust side must derive the same keys and decrypt everything."""

@@ -1,3 +1,5 @@
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 """Conformance run: the real Hermes SecretSourceConformance kit against
 CryptileSource. Requires a hermes-agent checkout (HERMES_REPO, default
 /tmp/hermes); skipped with a clear notice when unavailable."""

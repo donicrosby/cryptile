@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Secret-carrying values with enforced redaction — delegated to `secrecy`.
 //!
 //! [`secrecy::SecretString`] (backed by its `zeroize` dependency) provides:

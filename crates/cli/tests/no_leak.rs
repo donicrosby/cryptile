@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! End-to-end guard: secret material must never reach the CLI's stdout/stderr
 //! through formatting paths. Mirrors the unit tests but exercises the actual
 //! binary, catching accidental future `Display`/`Debug` leaks in one place.

@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Vaultwarden/Bitwarden zero-knowledge crypto.
 //!
 //! Implemented from the public Bitwarden Security Whitepaper, cross-verified

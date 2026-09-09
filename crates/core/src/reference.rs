@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Normalized secret reference: `scheme://locus[#field]`.
 //!
 //! The single addressing currency across CLI args, config files, and the Hermes

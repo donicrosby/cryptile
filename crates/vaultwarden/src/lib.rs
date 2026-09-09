@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! cryptile-vaultwarden — the first Provider backend for cryptile.
 //!
 //! Implements the Bitwarden client protocol against Vaultwarden servers:

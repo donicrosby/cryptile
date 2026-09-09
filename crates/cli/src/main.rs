@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! cryptile CLI.
 //!
 //! MVP surface: login (TTY-gated), get, list, parse, backends. Values reach

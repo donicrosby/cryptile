@@ -1,3 +1,5 @@
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 """Unit tests for the Cryptile Hermes secret source.
 
 Runs against a FAKE cryptile binary (a Python script that inspects its argv

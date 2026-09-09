@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! CLI state on disk: server URL + account (plaintext config) and the
 //! passphrase-sealed keyring holding the session.
 //!

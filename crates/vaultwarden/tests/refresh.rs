@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Token refresh round-trip against a wiremock identity server.
 //! Proves: refresh grant rotates the access token, preserves the user key,
 //! and a session without a refresh token fails with AuthExpired (caller

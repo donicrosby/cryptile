@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Master-key derivation and login hashing (whitepaper §Account Creation).
 
 use hkdf::Hkdf;

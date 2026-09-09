@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Export e2e + boundary tests. The e2e spins a wiremock VW with the real
 //! crypto fixture and drives export through --passphrase-env (no TTY),
 //! exactly the Hermes bootstrap path.

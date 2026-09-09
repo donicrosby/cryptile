@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Resource model every backend maps into.
 //!
 //! Backends are field-bag shaped (Bitwarden items, 1Password items, Vault KV

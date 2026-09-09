@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Keyring roundtrip + adversarial tests. Argon2id at 64 MiB per derivation,
 //! so each test does as few seal/open cycles as possible.
 

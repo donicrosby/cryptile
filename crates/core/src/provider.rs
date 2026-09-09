@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 use crate::model::{Namespace, Secret, SecretMeta};
 use crate::SecretString;
 use thiserror::Error;

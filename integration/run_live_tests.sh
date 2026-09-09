@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 # Cryptile live-fire test suite: boots a real Vaultwarden via compose,
 # provisions it through the public API, runs the real cryptile binary
 # against it, tears everything down. Exit code = number of failures.

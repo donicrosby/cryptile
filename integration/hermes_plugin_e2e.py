@@ -1,3 +1,5 @@
+# Copyright 2026 Doni Crosby
+# SPDX-License-Identifier: Apache-2.0
 """Live E2E: CryptileSource.fetch() + Hermes apply_all() against live VW.
 
 Runs AFTER run_live_tests.sh has provisioned VW, logged in, and left the

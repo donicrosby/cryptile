@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Cipher → cryptile-core Secret mapping, and collection-name resolution.
 
 use cryptile_core::model::Secret;

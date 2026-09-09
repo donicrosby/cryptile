@@ -1,3 +1,5 @@
+// Copyright 2026 Doni Crosby
+// SPDX-License-Identifier: Apache-2.0
 //! Provider ops with 4.5 refresh semantics: on AuthExpired, refresh once
 //! via the session's refresh token and retry once. No loops, one hint.
 //!
