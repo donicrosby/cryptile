@@ -32,3 +32,8 @@ tracing.workspace = true
 [dev-dependencies]
 wiremock.workspace = true
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+criterion = "0.5"
+
+[[bench]]
+name = "encstring"
+harness = false

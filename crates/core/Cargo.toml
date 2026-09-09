@@ -21,3 +21,10 @@ base64.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
 rand_core.workspace = true
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "keyring"
+harness = false

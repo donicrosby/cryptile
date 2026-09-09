@@ -27,9 +27,16 @@ Baseline JSON lives at `integration/.run/bench-baseline.json`
 
 ## Criterion benches (crypto ops only)
 
-Command: `cargo bench` (not in CI; ~2 min budget).
+Command: `cargo bench` (not in CI; ~40 s total: 2×Argon2-bound benches at
+sample_size 10 + 1 fast decrypt bench).
 
-| Date | Bench | p50 | Notes |
+| Date | Bench | Median | Notes |
 |------|-------|-----|-------|
-| TBD  | keyring seal/unseal | | |
-| TBD  | EncString type-2 decrypt | | |
+| 2026-09-09 | keyring/seal | 78.8 ms | Argon2id t=3/m=64MiB/p=4 dominates; salt+iv fresh per call |
+| 2026-09-09 | keyring/open | 78.0 ms | same KDF cost; AES+HMAC afterward is µs-scale |
+| 2026-09-09 | encstring/decrypt_type2_64b | 357 ns | MAC-verify + AES-CBC decrypt of a 64-byte payload |
+
+Reading: per-secret crypto overhead in a `get` is ~78 ms Argon2 (once per
+CLI invocation) plus sub-µs field decrypts — the 2.4 s live `get` p50 is
+network/sync-bound, not crypto-bound. Any `get` latency refactor targets
+the sync path (targeted cipher fetch or caching), not the crypto.
