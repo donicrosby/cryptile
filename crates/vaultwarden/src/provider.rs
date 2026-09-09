@@ -37,6 +37,14 @@ struct VwSession {
     expires_at: Option<u64>,
 }
 
+/// What `sync_and_keys` produces: the raw sync payload plus the decrypted
+/// org keys and plaintext collection names needed for ref resolution.
+type SyncBundle = (
+    crate::api::SyncResponse,
+    Vec<(String, SymmetricKey)>,
+    Vec<(String, String, String)>,
+);
+
 impl VaultwardenProvider {
     pub fn new(base_url: &str) -> Result<Self, ProviderError> {
         Ok(Self {
@@ -44,18 +52,15 @@ impl VaultwardenProvider {
         })
     }
 
+    #[tracing::instrument(
+        skip(self, access_token, user_key),
+        fields(ciphers = tracing::field::Empty, orgs = tracing::field::Empty, collections = tracing::field::Empty)
+    )]
     async fn sync_and_keys(
         &self,
         access_token: &str,
         user_key: &SymmetricKey,
-    ) -> Result<
-        (
-            crate::api::SyncResponse,
-            Vec<(String, SymmetricKey)>,
-            Vec<(String, String, String)>,
-        ),
-        ProviderError,
-    > {
+    ) -> Result<SyncBundle, ProviderError> {
         let sync = self.client.sync(access_token).await.map_err(map_api)?;
         let private_key = EncString::parse(&sync.profile.private_key)
             .and_then(|es| es.decrypt_symmetric(user_key))
@@ -87,6 +92,9 @@ impl VaultwardenProvider {
                 }
             }
         }
+        tracing::Span::current().record("ciphers", tracing::field::display(sync.ciphers.len()));
+        tracing::Span::current().record("orgs", tracing::field::display(org_keys.len()));
+        tracing::Span::current().record("collections", tracing::field::display(collections.len()));
         Ok((sync, org_keys, collections))
     }
 }

@@ -142,6 +142,7 @@ impl Client {
     /// Prelogin: fetch per-account KDF parameters. JSON body: both VW and
     /// upstream expect `{"email": ...}`; VW's Rocket rejects form-encoded
     /// prelogin with a bare 400.
+    #[tracing::instrument(skip(self), fields(op = "prelogin"))]
     pub async fn prelogin(&self, email: &str) -> Result<PreloginResponse, ApiError> {
         let resp = self
             .http
@@ -154,7 +155,8 @@ impl Client {
         Self::parse(resp, "prelogin").await
     }
 
-    /// Password grant. `password` is the base64 auth hash, never plaintext.
+    /// Password grant. `auth_hash_b64` is the base64 auth hash, never plaintext.
+    #[tracing::instrument(skip(self, auth_hash_b64), fields(op = "token_password"))]
     pub async fn token_password(
         &self,
         email: &str,
@@ -178,6 +180,7 @@ impl Client {
     }
 
     /// Refresh-token grant.
+    #[tracing::instrument(skip(self, refresh_token), fields(op = "token_refresh"))]
     pub async fn token_refresh(&self, refresh_token: &str) -> Result<TokenResponse, ApiError> {
         self.post_form(
             &format!("{}/connect/token", self.identity_url),
@@ -192,6 +195,7 @@ impl Client {
     }
 
     /// Full sync: profile (keys, orgs) + ciphers.
+    #[tracing::instrument(skip(self, access_token), fields(op = "sync"))]
     pub async fn sync(&self, access_token: &str) -> Result<SyncResponse, ApiError> {
         let resp = self
             .http
@@ -204,6 +208,7 @@ impl Client {
     }
 
     /// User-visible collections (Namespace mapping).
+    #[tracing::instrument(skip(self, access_token), fields(op = "collections"))]
     pub async fn collections(&self, access_token: &str) -> Result<Vec<ApiCollection>, ApiError> {
         let resp = self
             .http

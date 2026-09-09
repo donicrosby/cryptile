@@ -36,7 +36,9 @@ GET_REF = os.environ.get("CRYPTILE_BENCH_REF", "vw://shared/Postgres HQ#password
 GET_N = int(os.environ.get("CRYPTILE_BENCH_N", "10"))
 LOGIN_N = int(os.environ.get("CRYPTILE_BENCH_LOGIN_N", "3"))
 RUN_DIR = Path(__file__).resolve().parent / ".run"
-BASELINE_PATH = RUN_DIR / "bench-baseline.json"
+# Deliberately OUTSIDE .run — run_live_tests.sh wipes that directory on
+# every provision. The baseline must survive across harness runs.
+BASELINE_PATH = Path(__file__).resolve().parent / ".bench-baseline.json"
 
 # Sanity ceilings only — catches pathological regressions, not
 # performance policing. Live VW over compose is allowed to be slow.
@@ -52,6 +54,16 @@ def timed_run(argv, extra_env):
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     return proc.returncode, elapsed_ms
+
+
+def run_capture(argv, extra_env):
+    """Run without timing; return (rc, stdout, stderr)."""
+    env = dict(os.environ)
+    env.update(extra_env)
+    proc = subprocess.run(
+        argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env
+    )
+    return proc.returncode, proc.stdout, proc.stderr
 
 
 def percentile(samples, q):
@@ -105,6 +117,28 @@ def print_delta(label, current, baseline):
         print(f"bench {label} {key} vs baseline: {delta:+.0f}ms ({pct:+.0f}%)")
 
 
+def verify_span_output(get_argv, child_env):
+    """One extra get with RUST_LOG=cryptile=debug must print phase spans;
+    one without must not. Keeps the tracing gate honest against the live
+    server, not just the dead-server unit test."""
+    rc, _, err = run_capture(get_argv, {**child_env, "RUST_LOG": "cryptile=debug"})
+    if rc != 0:
+        print(f"FAIL: span-verification get exited {rc}")
+        return False
+    needed = ("keyring_unlock", "sync", "cli_total")
+    missing = [m for m in needed if m not in err]
+    if missing:
+        print(f"FAIL: RUST_LOG run missing span markers: {missing}")
+        return False
+    print("PASS: RUST_LOG=debug get emits keyring_unlock/sync/cli_total spans")
+    rc2, _, err2 = run_capture(get_argv, child_env)
+    if rc2 == 0 and any(m in err2 for m in needed):
+        print("FAIL: span markers emitted without RUST_LOG")
+        return False
+    print("PASS: no span output without RUST_LOG")
+    return True
+
+
 def main():
     if not STATE_DIR or not PASSPHRASE:
         print("FAIL: bench needs CRYPTILE_STATE_DIR and CRYPTILE_PASSPHRASE")
@@ -132,8 +166,9 @@ def main():
     print("bench: N=%d get, %d login (phase wall-clock, ms)" % (GET_N, LOGIN_N))
     login_stats = bench_phase("login", login_argv, child_env, LOGIN_N)
     get_stats = bench_phase("get", get_argv, child_env, GET_N)
+    span_ok = verify_span_output(get_argv, child_env)
 
-    ok = login_stats is not None and get_stats is not None
+    ok = login_stats is not None and get_stats is not None and span_ok
     if ok:
         for label, s in (("login", login_stats), ("get", get_stats)):
             print_delta(label, s, baseline)
@@ -144,7 +179,7 @@ def main():
             "login_n": LOGIN_N,
             "phases": {"login": login_stats, "get": get_stats},
         }
-        RUN_DIR.mkdir(parents=True, exist_ok=True)
+        BASELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
         BASELINE_PATH.write_text(json.dumps(record, indent=2) + "\n")
         if SUMMARY_PATH:
             try:

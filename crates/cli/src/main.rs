@@ -120,8 +120,26 @@ fn read_secret(prompt: &str) -> Result<SecStr, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Install a tracing subscriber only when RUST_LOG asks for one. Default
+/// off: no env var, no subscriber, no per-span cost worth mentioning.
+/// Never called from tests (assert_cmd children read RUST_LOG themselves).
+fn init_tracing() {
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::EnvFilter;
+    if std::env::var_os("RUST_LOG").is_some() {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_target(false)
+            .with_span_events(FmtSpan::CLOSE)
+            .with_writer(std::io::stderr)
+            .init();
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    init_tracing();
+    let _total = tracing::info_span!("cli_total").entered();
     let cli = Cli::parse();
     let state = match &cli.state_dir {
         Some(d) => State::with_dir(d),
@@ -359,7 +377,10 @@ fn load_state_for(
                 .map_err(|e| e.to_string())?
         }
     };
-    let session = state.load_session(&passphrase)?;
+    let session = {
+        let _guard = tracing::info_span!("keyring_unlock").entered();
+        state.load_session(&passphrase)?
+    };
     Ok((cfg, passphrase, session))
 }
 

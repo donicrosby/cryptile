@@ -3,3 +3,4 @@
 integration/.run/
 __pycache__/
 .pytest-tmp/
+.bench-baseline.json
