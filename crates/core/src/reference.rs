@@ -51,6 +51,10 @@ pub struct Ref {
     pub locus: String,
     /// Field selector; defaults to `password`.
     pub field: String,
+    /// Whether the fragment was written in the ref string. Only defaulted
+    /// refs walk the primary-value fallback chain at resolution time;
+    /// an explicit selector is honored exactly as written.
+    pub field_explicit: bool,
 }
 
 impl Ref {
@@ -64,9 +68,9 @@ impl Ref {
         if !KNOWN_SCHEMES.contains(&scheme.as_str()) {
             return Err(ParseRefError::UnsupportedScheme(scheme_part.to_string()));
         }
-        let (locus, field) = match rest.split_once('#') {
-            Some((l, f)) => (l, f),
-            None => (rest, Self::DEFAULT_FIELD),
+        let (locus, field, explicit) = match rest.split_once('#') {
+            Some((l, f)) => (l, f, true),
+            None => (rest, Self::DEFAULT_FIELD, false),
         };
         if locus.is_empty() {
             return Err(ParseRefError::EmptyLocus);
@@ -78,6 +82,7 @@ impl Ref {
             scheme,
             locus: locus.to_string(),
             field: field.to_string(),
+            field_explicit: explicit,
         })
     }
 }
@@ -112,9 +117,22 @@ mod tests {
     fn defaults_field_to_password() {
         let r = Ref::parse("op://Private/github").unwrap();
         assert_eq!(r.field, Ref::DEFAULT_FIELD);
-        // Round-trips with the explicit fragment.
+        assert!(!r.field_explicit);
+        // Round-trips: same scheme/locus/field, now explicitly selected.
         let explicit = Ref::parse(&r.to_string()).unwrap();
-        assert_eq!(explicit, r);
+        assert_eq!(explicit.scheme, r.scheme);
+        assert_eq!(explicit.locus, r.locus);
+        assert_eq!(explicit.field, r.field);
+        assert!(explicit.field_explicit);
+    }
+
+    #[test]
+    fn tracks_field_explicitness() {
+        let bare = Ref::parse("vw://shared/lease-key").unwrap();
+        let frag = Ref::parse("vw://shared/lease-key#notes").unwrap();
+        assert!(!bare.field_explicit);
+        assert!(frag.field_explicit);
+        assert_eq!(bare.field, "password");
     }
 
     #[test]

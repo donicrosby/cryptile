@@ -7,7 +7,9 @@
 //! are derived from the error kind, not stringified soup.
 
 use cryptile_core::provider::Provider;
-use cryptile_core::{ExposeSecret, Namespace, Ref, Secret, SecretMeta, Session};
+use cryptile_core::{
+    ExposeSecret, Namespace, Ref, Secret, SecretMeta, Session, PRIMARY_FIELD_CHAIN,
+};
 
 const HINT: &str = "session expired and refresh failed; run `cryptile login` to re-establish";
 
@@ -143,10 +145,22 @@ pub async fn get(
             }
             Err(e) => return Err(e),
         };
-    let field = secret.field(&r.field).ok_or_else(|| {
+    let field = if r.field_explicit {
+        secret.field(&r.field)
+    } else {
+        // Fragment-less ref: the field bag's shape is the item type —
+        // walk the shared chain instead of assuming a password.
+        secret.primary_value()
+    }
+    .ok_or_else(|| {
+        let wanted = if r.field_explicit {
+            r.field.clone()
+        } else {
+            format!("any of [{}]", PRIMARY_FIELD_CHAIN.join(", "))
+        };
         cryptile_core::ProviderError::NotFound(format!(
             "field '{}' not present on {}",
-            r.field, r.locus
+            wanted, r.locus
         ))
     })?;
     Ok((session, field.expose_secret().to_string()))

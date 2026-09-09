@@ -44,10 +44,23 @@ Spec-driven: every feature lands as an OpenSpec change proposal before code.
 ## Field names by item type
 
 `vw://collection/item#field` — every item type maps into one flat field bag.
-`#password` is the default field when a ref names none. Names are stable;
-custom fields join the bag under their own (decrypted) name. Items sealed
+Custom fields join the bag under their own (decrypted) name. Items sealed
 under a cipher-level key (servers with per-cipher encryption) are unwrapped
 transparently.
+
+A ref with no fragment resolves to the item's primary value by walking a
+fixed chain over the field bag — the bag's shape stands in for the item
+type: `password → notes → private_key → number`, first non-empty hit wins.
+
+| Bare ref resolves to | Item shape |
+|---|---|
+| `password` | Login (any item that has one) |
+| `notes` | Secure Note; anything whose payload lives in notes |
+| `private_key` | SSH Key |
+| `number` | Card |
+
+An explicit `#field` is honored exactly as written — no substitution, a
+missing field fails with the field-not-present error.
 
 | Item type | Fields |
 |---|---|

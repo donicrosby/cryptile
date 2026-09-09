@@ -275,4 +275,34 @@ async fn full_login_sync_get_roundtrip() {
         secret.field("notes").unwrap().expose_secret(),
         fx["expect"]["cipherkey_notes"].as_str().unwrap()
     );
+
+    // bare ref on a note resolves via the primary chain (no password on a
+    // note -> notes). Fragment-less must equal #notes here.
+    let bare = Ref::parse("vw://shared/lease-key").unwrap();
+    let secret = provider.get_secret(&session, &bare).await.unwrap();
+    assert_eq!(
+        secret.primary_value().unwrap().expose_secret(),
+        fx["expect"]["note_notes"].as_str().unwrap()
+    );
+    // bare ref on the per-cipher-key note too (chain + unwrap composed).
+    let bare = Ref::parse("vw://shared/per-cipher-key-note").unwrap();
+    let secret = provider.get_secret(&session, &bare).await.unwrap();
+    assert_eq!(
+        secret.primary_value().unwrap().expose_secret(),
+        fx["expect"]["cipherkey_notes"].as_str().unwrap()
+    );
+    // bare ref on a card -> number (no password/notes on the fixture card).
+    let bare = Ref::parse("vw://shared/corp-card").unwrap();
+    let secret = provider.get_secret(&session, &bare).await.unwrap();
+    assert_eq!(
+        secret.primary_value().unwrap().expose_secret(),
+        fx["expect"]["card_number"].as_str().unwrap()
+    );
+    // bare ref on a login with password: password still wins.
+    let bare = Ref::parse("vw://shared/smtp").unwrap();
+    let secret = provider.get_secret(&session, &bare).await.unwrap();
+    assert_eq!(
+        secret.primary_value().unwrap().expose_secret(),
+        fx["expect"]["org_item_password"].as_str().unwrap()
+    );
 }

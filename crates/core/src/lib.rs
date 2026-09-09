@@ -17,7 +17,7 @@ pub mod reference;
 pub mod value;
 
 pub use keyring::{Keyring, KeyringError};
-pub use model::{Namespace, Secret, SecretMeta, Session};
+pub use model::{Namespace, Secret, SecretMeta, Session, PRIMARY_FIELD_CHAIN};
 pub use provider::{LoginParams, Provider, ProviderError};
 pub use reference::{ParseRefError, Ref};
 pub use secrecy::{ExposeSecret, SecretString};
