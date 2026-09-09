@@ -178,6 +178,26 @@ expect_eq "backends exit 0" 0 "$RC"
 expect_contains "backends lists vw" "vw" "$OUT"
 
 # ---------------------------------------------------------------------------
+echo "== hermes plugin e2e =="
+if [ -d "${HERMES_REPO:-/tmp/hermes}" ] && command -v python3 >/dev/null 2>&1; then
+    PLUGIN_LOG="$(mktemp)"
+    if CRYPTILE_STATE_DIR="$STATE_DIR" CRYPTILE_PASSPHRASE="$PASSPHRASE" \
+       CRYPTILE_LIVE_SUMMARY="$SUMMARY" HERMES_REPO="${HERMES_REPO:-/tmp/hermes}" \
+       python3 "$REPO/integration/hermes_plugin_e2e.py" | tee "$PLUGIN_LOG"; then
+        :
+    else
+        echo "(plugin e2e exited nonzero; failures listed above)"
+    fi
+    PLUGIN_P="$(grep -c '^PASS:' "$PLUGIN_LOG" || true)"
+    PLUGIN_F="$(grep -c '^FAIL:' "$PLUGIN_LOG" || true)"
+    PASS_COUNT=$((PASS_COUNT + PLUGIN_P))
+    FAIL_COUNT=$((FAIL_COUNT + PLUGIN_F))
+    rm -f "$PLUGIN_LOG"
+else
+    echo "SKIP: hermes plugin e2e (no hermes checkout at HERMES_REPO)"
+fi
+
+# ---------------------------------------------------------------------------
 echo
 echo "results: $PASS_COUNT passed, $FAIL_COUNT failed"
 exit "$FAIL_COUNT"

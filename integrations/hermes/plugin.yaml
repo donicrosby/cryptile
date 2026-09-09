@@ -1,0 +1,4 @@
+name: cryptile
+description: Vaultwarden secrets via the cryptile CLI (vw:// refs; sealed keyring; typed exit codes)
+version: 0.1.0
+api_version: 1

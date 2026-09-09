@@ -47,11 +47,19 @@ enum Command {
         master_password_env: Option<String>,
     },
     /// Print one secret field value (vw://collection/item#field)
-    Get { r#ref: String },
+    Get {
+        r#ref: String,
+        /// Read the keyring passphrase from this env var (agent contexts)
+        #[arg(long)]
+        passphrase_env: Option<String>,
+    },
     /// List namespaces, or items in one namespace (metadata only)
     List {
         /// Namespace (collection) name; omit to list namespaces
         namespace: Option<String>,
+        /// Read the keyring passphrase from this env var (agent contexts)
+        #[arg(long)]
+        passphrase_env: Option<String>,
     },
     /// Export all values in a namespace as KEY=value (or JSON)
     Export {
@@ -186,12 +194,16 @@ async fn main() -> ExitCode {
             println!("logged in; session sealed in {}", state.dir().display());
             ExitCode::SUCCESS
         }
-        Command::Get { r#ref } => {
+        Command::Get {
+            r#ref,
+            passphrase_env,
+        } => {
             let r = match Ref::parse(&r#ref) {
                 Ok(r) => r,
                 Err(e) => return die(format!("{e}"), 2),
             };
-            let (cfg, passphrase, session) = match load_state_for(&state, None) {
+            let (cfg, passphrase, session) = match load_state_for(&state, passphrase_env.as_deref())
+            {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
@@ -208,8 +220,12 @@ async fn main() -> ExitCode {
                 Err(e) => die_provider(e),
             }
         }
-        Command::List { namespace } => {
-            let (cfg, passphrase, session) = match load_state_for(&state, None) {
+        Command::List {
+            namespace,
+            passphrase_env,
+        } => {
+            let (cfg, passphrase, session) = match load_state_for(&state, passphrase_env.as_deref())
+            {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };

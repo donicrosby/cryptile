@@ -55,7 +55,7 @@ fn get_with_state_but_no_tty_refuses_passphrase_prompt() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("config.json"),
-        r#"{"server":"https://vault.example.com","account":"a@b.c"}"#,
+        r#"{"server":"http://127.0.0.1:1","account":"a@b.c"}"#,
     )
     .unwrap();
     // sealed with a throwaway passphrase; content irrelevant here
@@ -82,7 +82,7 @@ fn login_without_tty_refuses_master_password_prompt() {
         .arg(tmp.path())
         .arg("login")
         .arg("--server")
-        .arg("https://vault.example.com")
+        .arg("http://127.0.0.1:1")
         .arg("--account")
         .arg("a@b.c")
         .assert()
@@ -107,4 +107,89 @@ fn list_without_login_is_exit_3() {
 #[test]
 fn backends_lists_linked_backends() {
     cryptile().arg("backends").assert().success().stdout("vw\n");
+}
+
+// --- --passphrase-env on get/list (machine path for the Hermes plugin) ---
+
+fn state_with_sealed_keyring() -> (tempfile::TempDir, std::path::PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("state");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"server":"http://127.0.0.1:1","account":"a@b.c"}"#,
+    )
+    .unwrap();
+    let line = cryptile_core::keyring::seal("{}", &secrecy::SecretString::from("x")).unwrap();
+    std::fs::write(dir.join("keyring"), line).unwrap();
+    (tmp, dir)
+}
+
+#[test]
+fn get_passphrase_env_unset_var_is_exit_3() {
+    let (tmp, dir) = state_with_sealed_keyring();
+    cryptile()
+        .env_remove("CRYPTILE_TEST_PASS")
+        .arg("--state-dir")
+        .arg(&dir)
+        .arg("get")
+        .arg("vw://shared/smtp#password")
+        .arg("--passphrase-env")
+        .arg("CRYPTILE_TEST_PASS")
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(contains("is not set"));
+    drop(tmp);
+}
+
+#[test]
+fn get_passphrase_env_wrong_value_is_exit_3() {
+    let (tmp, dir) = state_with_sealed_keyring();
+    cryptile()
+        .env("CRYPTILE_TEST_PASS", "definitely-wrong")
+        .arg("--state-dir")
+        .arg(&dir)
+        .arg("get")
+        .arg("vw://shared/smtp#password")
+        .arg("--passphrase-env")
+        .arg("CRYPTILE_TEST_PASS")
+        .assert()
+        .failure()
+        .code(3);
+    drop(tmp);
+}
+
+#[test]
+fn get_passphrase_env_valid_session_reaches_transport_exit_4() {
+    // A well-formed VW session handle sealed under passphrase "x": unseal
+    // AND deserialize succeed, then http://127.0.0.1:1 refuses the
+    // connection — exit 4. Proves the whole env-var path end to end.
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("state");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"server":"http://127.0.0.1:1","account":"a@b.c"}"#,
+    )
+    .unwrap();
+    // 64 zero bytes, base64: valid key shape, so deserialization succeeds and
+    // the op proceeds to the (refused) transport call.
+    let session_json = r#"{"access_token":"t","user_key_b64":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="}"#;
+    let line =
+        cryptile_core::keyring::seal(session_json, &secrecy::SecretString::from("x")).unwrap();
+    std::fs::write(dir.join("keyring"), line).unwrap();
+
+    cryptile()
+        .env("CRYPTILE_TEST_PASS", "x")
+        .arg("--state-dir")
+        .arg(&dir)
+        .arg("get")
+        .arg("vw://shared/smtp#password")
+        .arg("--passphrase-env")
+        .arg("CRYPTILE_TEST_PASS")
+        .assert()
+        .failure()
+        .code(4);
+    drop(tmp);
 }
