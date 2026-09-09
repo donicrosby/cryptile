@@ -354,3 +354,27 @@ the user as an error.
 - **WHEN** `login` is run for a different account than the cache holds
 - **THEN** the cache file is deleted before any rebuild; re-login for
   the same account keeps it
+
+### Requirement: Type-aware default field resolution
+
+When a ref carries no field fragment, the system SHALL resolve the value by
+walking a fixed fallback chain over the resolved secret's field bag —
+`password`, then `notes`, then `private_key`, then `number` — returning the
+first present non-empty field. Explicitly selected fields SHALL NOT fall back.
+
+#### Scenario: Secure note via bare ref
+- WHEN a ref names a Secure Note item without a fragment
+- THEN the value returned is the item's `notes` field
+
+#### Scenario: Card via bare ref
+- WHEN a ref names a Card item without a fragment and the item has no
+  password or notes
+- THEN the value returned is the item's `number` field
+
+#### Scenario: Explicit field keeps exact semantics
+- WHEN a ref selects `#password` on an item that has no password field
+- THEN resolution fails with the field-not-present error, exactly as before
+
+#### Scenario: Empty fields are skipped
+- WHEN the first chain field exists but is empty
+- THEN resolution moves to the next chain field rather than returning empty
