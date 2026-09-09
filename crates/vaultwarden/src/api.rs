@@ -194,6 +194,21 @@ impl Client {
         .await
     }
 
+    /// Single-cipher fetch. Server enforces per-user accessibility
+    /// (`is_accessible_to_user`), so this leaks nothing across accounts.
+    /// 404 maps to `ApiError::Status`, i.e. `ProviderError::NotFound`.
+    #[tracing::instrument(skip(self, access_token), fields(op = "get_cipher"))]
+    pub async fn get_cipher(&self, access_token: &str, uuid: &str) -> Result<Cipher, ApiError> {
+        let resp = self
+            .http
+            .get(format!("{}/ciphers/{uuid}", self.api_url))
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|e| ApiError::Transport(e.to_string()))?;
+        Self::parse(resp, "get_cipher").await
+    }
+
     /// Full sync: profile (keys, orgs) + ciphers.
     #[tracing::instrument(skip(self, access_token), fields(op = "sync"))]
     pub async fn sync(&self, access_token: &str) -> Result<SyncResponse, ApiError> {

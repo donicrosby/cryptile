@@ -54,6 +54,9 @@ enum Command {
         /// Read the keyring passphrase from this env var (agent contexts)
         #[arg(long)]
         passphrase_env: Option<String>,
+        /// Ignore the sync cache for this fetch (full sync, rewrite cache)
+        #[arg(long)]
+        refresh_cache: bool,
     },
     /// List namespaces, or items in one namespace (metadata only)
     List {
@@ -130,6 +133,7 @@ fn init_tracing() {
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
             .with_target(false)
+            .with_ansi(false)
             .with_span_events(FmtSpan::CLOSE)
             .with_writer(std::io::stderr)
             .init();
@@ -193,7 +197,7 @@ async fn main() -> ExitCode {
                     Err(e) => return die(e, 2),
                 },
             };
-            let provider = match registry::open("vw", Some(&server)) {
+            let provider = match registry::open("vw", Some(&server), None) {
                 Ok(p) => p,
                 Err(e) => return die(e, 2),
             };
@@ -207,6 +211,14 @@ async fn main() -> ExitCode {
                 Ok(s) => s,
                 Err(e) => return die_provider(e),
             };
+            // Cache rotation: keep only when re-logging into the same
+            // account; a different account's cache cannot be unsealed
+            // anyway, but delete to avoid leaving data behind.
+            if let Ok(old) = state.load_config() {
+                if old.account != account {
+                    std::fs::remove_file(state.cache_path()).ok();
+                }
+            }
             let cfg = StateConfig { server, account };
             if let Err(e) = state.save_login(&cfg, &session.handle, &passphrase) {
                 return die(format!("saving state: {e}"), 5);
@@ -217,23 +229,29 @@ async fn main() -> ExitCode {
         Command::Get {
             r#ref,
             passphrase_env,
+            refresh_cache,
         } => {
             let r = match Ref::parse(&r#ref) {
                 Ok(r) => r,
                 Err(e) => return die(format!("{e}"), 2),
             };
+            if refresh_cache {
+                std::fs::remove_file(state.cache_path()).ok();
+            }
             let (cfg, passphrase, session) = match load_state_for(&state, passphrase_env.as_deref())
             {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
-            let provider = match registry::open(&r.scheme, Some(&cfg.server)) {
-                Ok(p) => p,
-                Err(e) => return die(e, 2),
-            };
+            let provider =
+                match registry::open(&r.scheme, Some(&cfg.server), Some(&state.cache_path())) {
+                    Ok(p) => p,
+                    Err(e) => return die(e, 2),
+                };
+            let handle_before = session.handle.clone();
             match ops::get(provider.as_ref(), session, &r).await {
                 Ok((sess, value)) => {
-                    reseal(&state, &sess, &passphrase);
+                    reseal(&state, &sess, &passphrase, &handle_before);
                     println!("{value}");
                     ExitCode::SUCCESS
                 }
@@ -249,13 +267,18 @@ async fn main() -> ExitCode {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
-            let provider = match registry::open(&session.provider, Some(&cfg.server)) {
+            let provider = match registry::open(
+                &session.provider,
+                Some(&cfg.server),
+                Some(&state.cache_path()),
+            ) {
                 Ok(p) => p,
                 Err(e) => return die(e, 2),
             };
+            let handle_before = session.handle.clone();
             match ops::list(provider.as_ref(), session, namespace).await {
                 Ok((sess, names)) => {
-                    reseal(&state, &sess, &passphrase);
+                    reseal(&state, &sess, &passphrase, &handle_before);
                     for n in names {
                         println!("{n}");
                     }
@@ -277,13 +300,18 @@ async fn main() -> ExitCode {
                 Ok(v) => v,
                 Err(msg) => return die(msg, 3),
             };
-            let provider = match registry::open(&session.provider, Some(&cfg.server)) {
+            let provider = match registry::open(
+                &session.provider,
+                Some(&cfg.server),
+                Some(&state.cache_path()),
+            ) {
                 Ok(p) => p,
                 Err(e) => return die(e, 2),
             };
+            let handle_before = session.handle.clone();
             match ops::export(provider.as_ref(), session, &namespace).await {
                 Ok((sess, secrets)) => {
-                    reseal(&state, &sess, &passphrase);
+                    reseal(&state, &sess, &passphrase, &handle_before);
                     match format.as_str() {
                         "json" => {
                             let mut obj = serde_json::Map::new();
@@ -384,7 +412,12 @@ fn load_state_for(
     Ok((cfg, passphrase, session))
 }
 
-fn reseal(state: &State, session: &cryptile_core::Session, passphrase: &SecStr) {
+fn reseal(state: &State, session: &cryptile_core::Session, passphrase: &SecStr, before: &str) {
+    // Only rewrite the keyring when the session actually changed (token
+    // refresh); an unchanged handle means no second Argon2 per command.
+    if session.handle == before {
+        return;
+    }
     if let Err(e) = Keyring::with_path(state.keyring_path()).save(&session.handle, passphrase) {
         eprintln!("warn: could not re-seal refreshed session: {e}");
     }

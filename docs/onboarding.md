@@ -64,7 +64,11 @@ cryptile backends        # prints: vw
 ```
 
 State lives at `~/.config/cryptile` (`config.json` + sealed `keyring`,
-0600/0700). For other locations pass `--state-dir`.
+0600/0700), plus a sealed sync cache at `cache/cipher-index` written
+after any full sync (holds the vault index + org keys, sealed under a
+key derived from your account's user key — delete the file to force a
+cold rebuild; `get --refresh-cache` does it in one step). For other
+locations pass `--state-dir`.
 
 ## 4. Login (once, on the Hermes host console)
 

@@ -56,6 +56,11 @@ impl State {
         self.dir.join("keyring")
     }
 
+    /// Sealed sync-cache file (backend-owned format; opaque to the CLI).
+    pub fn cache_path(&self) -> PathBuf {
+        self.dir.join("cache").join("cipher-index")
+    }
+
     /// Whether a login exists (config + keyring both present).
     pub fn logged_in(&self) -> bool {
         self.config_path().is_file() && self.keyring_path().is_file()

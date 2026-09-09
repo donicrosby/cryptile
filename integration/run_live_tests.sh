@@ -132,6 +132,21 @@ run() {
     ERR="$(cat /tmp/cryptile-live.err)"
 }
 
+run_env() {
+    # run_env <args...> -> sets OUT/ERR/RC. No pty: for commands that
+    # take --passphrase-env (no TTY prompt), so stderr (spans) stays
+    # separate from stdout (values) under RUST_LOG.
+    local rcfile
+    rcfile="$(mktemp)"
+    OUT="$(CRYPTILE_PASSPHRASE="$PASSPHRASE" \
+          "$BIN" --state-dir "$STATE_DIR" "$@" \
+          2>/tmp/cryptile-live.env.err)"
+    RC=$?
+    echo "$RC" > "$rcfile"
+    ERR="$(cat /tmp/cryptile-live.env.err)"
+    rm -f "$rcfile"
+}
+
 echo "== login =="
 run "$PASSPHRASE" login --server "$BASE_URL" --account "$EMAIL" --passphrase-env CRYPTILE_PASSPHRASE --master-password-env CRYPTILE_MASTER_PASSWORD
 expect_eq "login exit 0" 0 "$RC"
@@ -141,6 +156,41 @@ echo "== get =="
 run "$PASSPHRASE" get "vw://shared/Postgres HQ#password"
 expect_eq "get exit 0" 0 "$RC"
 expect_secret_eq "get returns seeded plaintext" "$ITEM_PASSWORD" "$OUT"
+
+echo "== sync cache =="
+CACHE_FILE="$STATE_DIR/cache/cipher-index"
+if [ -f "$CACHE_FILE" ]; then
+    pass "cold get wrote cache file"
+else
+    fail "cold get wrote cache file"
+fi
+# Warm get: same answer, and the phase spans prove no full sync happened.
+RUST_LOG=cryptile=debug run_env get "vw://shared/Postgres HQ#password" --passphrase-env CRYPTILE_PASSPHRASE
+expect_eq "warm get exit 0" 0 "$RC"
+expect_secret_eq "warm get returns seeded plaintext" "$ITEM_PASSWORD" "$OUT"
+expect_contains "warm get hit span" "get_warm" "$ERR"
+expect_contains "warm get recorded hit" "hit=\"true\"" "$ERR"
+# Keep the warm-run stderr for post-mortem (diagnostics only, no secrets).
+cp /tmp/cryptile-live.env.err "$RUN_DIR/warm.err" 2>/dev/null || true
+case "$ERR" in
+    *"op=\"sync\""*) fail "warm get avoided full sync" ;;
+    *) pass "warm get avoided full sync" ;;
+esac
+case "$ERR" in
+    *"op=\"collections\""*) fail "warm get avoided collections fetch" ;;
+    *) pass "warm get avoided collections fetch" ;;
+esac
+# Self-heal: corrupt the sealed cache; the next get must still succeed.
+printf 'crc1.garbage.garbage.garbage.garbage' > "$CACHE_FILE"
+run "$PASSPHRASE" get "vw://shared/Postgres HQ#password"
+expect_eq "tampered-cache get exit 0" 0 "$RC"
+expect_secret_eq "tampered-cache get still correct" "$ITEM_PASSWORD" "$OUT"
+[ -f "$CACHE_FILE" ] && pass "tampered cache rebuilt" || fail "tampered cache rebuilt"
+# --refresh-cache escape hatch.
+RUST_LOG=cryptile=debug run_env get "vw://shared/Postgres HQ#password" --refresh-cache --passphrase-env CRYPTILE_PASSPHRASE
+expect_eq "refresh-cache get exit 0" 0 "$RC"
+expect_secret_eq "refresh-cache get correct" "$ITEM_PASSWORD" "$OUT"
+expect_contains "refresh-cache forced sync" "op=\"sync\"" "$ERR"
 
 echo "== list =="
 run "$PASSPHRASE" list shared

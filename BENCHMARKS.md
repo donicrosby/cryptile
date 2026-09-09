@@ -12,6 +12,8 @@ sample counts via `CRYPTILE_BENCH_N`, default 10 `get` / 3 `login`).
 | Date | Host | login p50/p95/pmax (ms) | get p50/p95/pmax (ms) | Notes |
 |------|------|------------------------|----------------------|-------|
 | 2026-09-09 | c3b2b5e3acfd (deploy sandbox) | 1626 / 1672 / 1672 | 2401 / 2605 / 2605 | first baseline; get ≫ Argon2 (76 ms) — per-invocation full-vault sync suspected, refactor lead |
+| 2026-09-09 | c3b2b5e3acfd | 1619 / 1621 / 1621 | 2326 / – / – | sync-cache change in tree but bench still resealed every get (2× Argon2); sync avoided |
+| 2026-09-09 | c3b2b5e3acfd | 1619 / 1681 / 1681 | 1178 / 1331 / 1331 | warm cache + reseal-only-on-change; get is now Argon2-bound (unlock ~1.17 s, all network < 10 ms) |
 
 Baseline JSON lives at `integration/.run/bench-baseline.json`
 (gitignored); reruns print per-phase deltas against it.

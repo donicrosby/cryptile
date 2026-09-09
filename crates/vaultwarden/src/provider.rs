@@ -9,6 +9,7 @@ use cryptile_core::{ExposeSecret, Ref};
 use zeroize::Zeroizing;
 
 use crate::api::{ApiError, Client};
+use crate::cache::{CacheData, SyncCache};
 use crate::crypto::{
     auth_hash, derive_master_key, stretch_master_key, unwrap_org_key, EncString, KdfParams,
     SymmetricKey,
@@ -19,6 +20,9 @@ use crate::mapping::{map_cipher, resolve_collection};
 #[derive(Debug, Clone)]
 pub struct VaultwardenProvider {
     client: Client,
+    /// Optional sync-cache path. `None` disables the warm path entirely
+    /// (library use without a state dir).
+    cache_path: Option<std::path::PathBuf>,
 }
 
 /// The VW session state carried inside `Session.handle` (opaque JSON).
@@ -31,6 +35,10 @@ struct VwSession {
     /// 64B user key, base64. Present only while the process runs; the
     /// keyring wraps this whole struct when persisting.
     user_key_b64: String,
+    /// Account email (diagnostics + cache scoping). Absent in sessions
+    /// sealed before the sync cache existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<String>,
     /// Access-token expiry, unix seconds. Absent in sessions sealed before
     /// expiry tracking existed; those fall back to reactive 401 refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,7 +57,14 @@ impl VaultwardenProvider {
     pub fn new(base_url: &str) -> Result<Self, ProviderError> {
         Ok(Self {
             client: Client::from_base(base_url).map_err(map_api)?,
+            cache_path: None,
         })
+    }
+
+    /// Enable the sealed sync cache at this path (`<state>/cache/cipher-index`).
+    pub fn with_cache_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.cache_path = Some(path.into());
+        self
     }
 
     #[tracing::instrument(
@@ -172,6 +187,7 @@ impl Provider for VaultwardenProvider {
             access_token: token.access_token,
             refresh_token: token.refresh_token.or_else(|| sess.refresh_token.clone()),
             user_key_b64: sess.user_key_b64.clone(),
+            account: sess.account.clone(),
             expires_at: now_unix().map(|t| t + token.expires_in),
         };
         Ok(Session {
@@ -186,7 +202,7 @@ impl Provider for VaultwardenProvider {
     }
 
     async fn login(&self, params: LoginParams) -> Result<Session, ProviderError> {
-        let email = params.account;
+        let email = params.account.clone();
         let password = params.secret;
         let pre_raw: serde_json::Value = self.client.prelogin(&email).await.map_err(map_api)?.0;
         let kdf = kdf_from_json(&pre_raw);
@@ -206,6 +222,7 @@ impl Provider for VaultwardenProvider {
             access_token: token.access_token,
             refresh_token: token.refresh_token,
             user_key_b64,
+            account: Some(email),
             expires_at: now_unix().map(|t| t + token.expires_in),
         };
         Ok(Session {
@@ -275,6 +292,7 @@ impl Provider for VaultwardenProvider {
                 Err(_) => continue, // skip undecryptable; list survives
             }
         }
+        self.write_cache(&sess, &user_key, &sync, &org_keys, &collections);
         ok_metas(metas)
     }
 
@@ -314,6 +332,7 @@ impl Provider for VaultwardenProvider {
                 out.push(sec);
             }
         }
+        self.write_cache(&sess, &user_key, &sync, &org_keys, &collections);
         Ok(out)
     }
 
@@ -323,14 +342,31 @@ impl Provider for VaultwardenProvider {
         }
         let sess: VwSession = parse_session(s)?;
         let user_key = sess_user_key(&sess)?;
-        let (sync, org_keys, collections) =
-            self.sync_and_keys(&sess.access_token, &user_key).await?;
         let Some((coll, item)) = r.locus.split_once('/') else {
             return Err(ProviderError::BadRef(format!(
                 "vw locus must be collection/item: {}",
                 r.locus
             )));
         };
+
+        // Warm path: resolve collection + item name -> cipher uuid locally,
+        // then one targeted fetch. Any doubt (no cache, unknown name, 404,
+        // rename) falls through to the full-sync miss path.
+        if let Some(path) = self.cache_path.as_deref() {
+            let span = tracing::info_span!("get_warm", hit = tracing::field::Empty);
+            let _g = span.enter();
+            if let Some(cache) = SyncCache::at(path).load(&user_key) {
+                if let Some(sec) = self.get_secret_warm(&sess, &cache, coll, item).await? {
+                    span.record("hit", "true");
+                    return Ok(sec);
+                }
+            }
+            span.record("hit", "false");
+        }
+
+        // Miss path: today's behavior exactly — full sync, linear scan.
+        let (sync, org_keys, collections) =
+            self.sync_and_keys(&sess.access_token, &user_key).await?;
         let Some(coll_id) = resolve_collection(coll, &collections) else {
             return Err(ProviderError::NotFound(format!("collection {coll}")));
         };
@@ -354,9 +390,146 @@ impl Provider for VaultwardenProvider {
             if !name.eq_ignore_ascii_case(item) {
                 continue;
             }
-            return map_cipher(c, key).map_err(crypto_err);
+            let secret = map_cipher(c, key).map_err(crypto_err)?;
+            self.write_cache(&sess, &user_key, &sync, &org_keys, &collections);
+            return Ok(secret);
         }
         Err(ProviderError::NotFound(format!("vw://{coll}/{item}")))
+    }
+}
+
+impl VaultwardenProvider {
+    /// Warm-path resolution. Ok(None) = fall through to full sync.
+    #[tracing::instrument(skip(self, sess, cache), fields(op = "warm_lookup"))]
+    async fn get_secret_warm(
+        &self,
+        sess: &VwSession,
+        cache: &CacheData,
+        coll: &str,
+        item: &str,
+    ) -> Result<Option<Secret>, ProviderError> {
+        let coll_id = resolve_collection(coll, &cache.collection_tuples());
+        let Some(coll_id) = coll_id else {
+            return Ok(None);
+        };
+        // Candidate ciphers: name match within the collection. Could be
+        // more than one (same name in two collections of one org);
+        // try each until one fetch verifies.
+        let candidates: Vec<&crate::cache::CipherIndexEntry> = cache
+            .ciphers
+            .iter()
+            .filter(|c| {
+                c.name.eq_ignore_ascii_case(item)
+                    && match coll_id.is_empty() {
+                        true => c.org_id.is_none(),
+                        false => c.collection_ids.contains(&coll_id),
+                    }
+            })
+            .collect();
+        for entry in candidates {
+            let cipher = match self.client.get_cipher(&sess.access_token, &entry.id).await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::debug!(error = %e, "warm: targeted fetch failed");
+                    continue; // 404/stale -> try next candidate, else miss path
+                }
+            };
+            let Ok(key) = self.cipher_key(cache, &cipher, sess) else {
+                tracing::debug!("warm: org key missing from cache");
+                return Ok(None); // org key rotated out of cache -> resync
+            };
+            // Verify the name still matches — closes the rename race.
+            let name = match decrypt_str(&cipher.name, &key) {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::debug!(error = %e, "warm: name decrypt failed");
+                    return Ok(None);
+                }
+            };
+            if !name.eq_ignore_ascii_case(item) {
+                tracing::debug!(got = %name, "warm: name mismatch");
+                continue;
+            }
+            // Name verified: this is the cipher the ref asked for. A field
+            // failure now is a real error, not a cache miss.
+            return map_cipher(&cipher, &key).map(Some).map_err(crypto_err);
+        }
+        Ok(None)
+    }
+
+    /// Key for one cipher: org key from the cache when org-owned, else
+    /// the user key. Cache org-key miss (rotation) -> miss path.
+    fn cipher_key(
+        &self,
+        cache: &CacheData,
+        cipher: &crate::api::Cipher,
+        sess: &VwSession,
+    ) -> Result<SymmetricKey, ProviderError> {
+        match cipher.organization_id.as_deref() {
+            Some(org) => cache.org_key(org).ok_or(ProviderError::Crypto(
+                "org key missing from cache; resync needed".into(),
+            )),
+            None => sess_user_key(sess),
+        }
+    }
+
+    /// Build + persist the cache after a successful full sync. Best-effort.
+    #[tracing::instrument(skip(self, sess, user_key, sync, org_keys, collections))]
+    fn write_cache(
+        &self,
+        sess: &VwSession,
+        user_key: &SymmetricKey,
+        sync: &crate::api::SyncResponse,
+        org_keys: &[(String, SymmetricKey)],
+        collections: &[(String, String, String)],
+    ) {
+        let Some(path) = self.cache_path.as_deref() else {
+            return;
+        };
+        let mut coll_entries = Vec::new();
+        for (id, org_id, name) in collections {
+            coll_entries.push(crate::cache::CollectionIndexEntry {
+                id: id.clone(),
+                org_id: org_id.clone(),
+                name: name.clone(),
+            });
+        }
+        let mut cipher_entries = Vec::new();
+        for c in &sync.ciphers {
+            let key = key_for(&c.organization_id, org_keys, user_key);
+            let name = match decrypt_str(&c.name, key) {
+                Ok(n) => n,
+                Err(_) => continue, // undecryptable: leave out of the index
+            };
+            cipher_entries.push(crate::cache::CipherIndexEntry {
+                id: c.id.clone(),
+                org_id: c.organization_id.clone(),
+                name,
+                collection_ids: c.collection_ids.clone().unwrap_or_default(),
+            });
+        }
+        let mut org_entries = Vec::new();
+        for (org_id, k) in org_keys {
+            let mut b64 = [0u8; 64];
+            b64[..32].copy_from_slice(k.enc_bytes());
+            b64[32..].copy_from_slice(k.mac_bytes());
+            use base64::Engine as _;
+            org_entries.push(crate::cache::OrgKeyEntry {
+                org_id: org_id.clone(),
+                key_b64: base64::engine::general_purpose::STANDARD.encode(b64),
+            });
+        }
+        let data = CacheData {
+            v: 1,
+            account: sess.account.clone(),
+            collections: coll_entries,
+            ciphers: cipher_entries,
+            org_keys: org_entries,
+        };
+        let file = SyncCache::at(path);
+        if let Err(e) = file.store(user_key, &data) {
+            tracing::warn!(error = %e, "sync cache write failed (non-fatal)");
+        }
     }
 }
 

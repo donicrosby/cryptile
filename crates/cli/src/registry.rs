@@ -6,15 +6,23 @@
 
 use cryptile_core::provider::Provider;
 
-/// Build the provider for a ref scheme / stored backend id.
-pub fn open(scheme: &str, server: Option<&str>) -> Result<Box<dyn Provider>, String> {
+/// Build the provider for a ref scheme / stored backend id. `cache_path`
+/// enables the backend's sealed sync cache when it supports one.
+pub fn open(
+    scheme: &str,
+    server: Option<&str>,
+    cache_path: Option<&std::path::Path>,
+) -> Result<Box<dyn Provider>, String> {
     match scheme {
         "vw" => {
             use cryptile_vaultwarden::VaultwardenProvider;
             let server = server.ok_or_else(|| {
                 "vw backend needs a server URL (run `cryptile login`)".to_string()
             })?;
-            let p = VaultwardenProvider::new(server).map_err(|e| e.to_string())?;
+            let mut p = VaultwardenProvider::new(server).map_err(|e| e.to_string())?;
+            if let Some(path) = cache_path {
+                p = p.with_cache_path(path);
+            }
             Ok(Box::new(p))
         }
         other => Err(format!(

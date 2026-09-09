@@ -10,6 +10,7 @@
 //! implementation.
 
 pub mod api;
+pub mod cache;
 pub mod crypto;
 pub mod mapping;
 pub mod provider;
