@@ -286,8 +286,12 @@ impl Provider for VaultwardenProvider {
             if !belongs {
                 continue;
             }
-            let key = key_for(&c.organization_id, &org_keys, &user_key);
-            match map_cipher(c, key) {
+            let container = key_for(&c.organization_id, &org_keys, &user_key);
+            let key = match effective_key(c.key.as_deref(), container) {
+                Ok(k) => k,
+                Err(_) => continue, // key-bearing but unwrap failed: undecryptable; list survives
+            };
+            match map_cipher(c, &key) {
                 Ok(sec) => metas.push(sec.meta),
                 Err(_) => continue, // skip undecryptable; list survives
             }
@@ -327,8 +331,12 @@ impl Provider for VaultwardenProvider {
             if !belongs {
                 continue;
             }
-            let key = key_for(&c.organization_id, &org_keys, &user_key);
-            if let Ok(sec) = map_cipher(c, key) {
+            let container = key_for(&c.organization_id, &org_keys, &user_key);
+            let key = match effective_key(c.key.as_deref(), container) {
+                Ok(k) => k,
+                Err(_) => continue, // key-bearing but unwrap failed: undecryptable; list survives
+            };
+            if let Ok(sec) = map_cipher(c, &key) {
                 out.push(sec);
             }
         }
@@ -370,6 +378,7 @@ impl Provider for VaultwardenProvider {
         let Some(coll_id) = resolve_collection(coll, &collections) else {
             return Err(ProviderError::NotFound(format!("collection {coll}")));
         };
+        let mut unwrap_failures = 0usize;
         for c in &sync.ciphers {
             let belongs = match (&c.organization_id, coll_id.is_empty()) {
                 (None, true) => true,
@@ -383,16 +392,34 @@ impl Provider for VaultwardenProvider {
             if !belongs {
                 continue;
             }
-            let key = key_for(&c.organization_id, &org_keys, &user_key);
-            let Ok(name) = decrypt_str(&c.name, key) else {
+            let container = key_for(&c.organization_id, &org_keys, &user_key);
+            let key = match effective_key(c.key.as_deref(), container) {
+                Ok(k) => k,
+                Err(e) => {
+                    // Key-bearing cipher we cannot unwrap (stale/wrong
+                    // container key). Can't read its name, can't match;
+                    // remember it so a no-match scan reports the real
+                    // problem instead of a ghost "not found".
+                    tracing::debug!(error = %e, id = %c.id, "cipher-level key unwrap failed");
+                    unwrap_failures += 1;
+                    continue;
+                }
+            };
+            let Ok(name) = decrypt_str(&c.name, &key) else {
                 continue;
             };
             if !name.eq_ignore_ascii_case(item) {
                 continue;
             }
-            let secret = map_cipher(c, key).map_err(crypto_err)?;
+            let secret = map_cipher(c, &key).map_err(crypto_err)?;
             self.write_cache(&sess, &user_key, &sync, &org_keys, &collections);
             return Ok(secret);
+        }
+        if unwrap_failures > 0 {
+            return Err(ProviderError::Crypto(format!(
+                "{unwrap_failures} cipher(s) in collection {coll} carry cipher-level \
+                 keys that fail to unwrap under the available container keys"
+            )));
         }
         Err(ProviderError::NotFound(format!("vw://{coll}/{item}")))
     }
@@ -434,9 +461,16 @@ impl VaultwardenProvider {
                     continue; // 404/stale -> try next candidate, else miss path
                 }
             };
-            let Ok(key) = self.cipher_key(cache, &cipher, sess) else {
+            let Ok(container) = self.cipher_key(cache, &cipher, sess) else {
                 tracing::debug!("warm: org key missing from cache");
                 return Ok(None); // org key rotated out of cache -> resync
+            };
+            let key = match effective_key(cipher.key.as_deref(), &container) {
+                Ok(k) => k,
+                Err(e) => {
+                    tracing::debug!(error = %e, "warm: cipher-level key unwrap failed");
+                    return Ok(None); // container key stale -> resync, miss path reports
+                }
             };
             // Verify the name still matches — closes the rename race.
             let name = match decrypt_str(&cipher.name, &key) {
@@ -496,8 +530,11 @@ impl VaultwardenProvider {
         }
         let mut cipher_entries = Vec::new();
         for c in &sync.ciphers {
-            let key = key_for(&c.organization_id, org_keys, user_key);
-            let name = match decrypt_str(&c.name, key) {
+            let container = key_for(&c.organization_id, org_keys, user_key);
+            let Ok(key) = effective_key(c.key.as_deref(), container) else {
+                continue; // undecryptable: leave out of the index
+            };
+            let name = match decrypt_str(&c.name, &key) {
                 Ok(n) => n,
                 Err(_) => continue, // undecryptable: leave out of the index
             };
@@ -568,6 +605,24 @@ fn key_for<'a>(
             .map(|(_, k)| k)
             .unwrap_or(user_key),
         None => user_key,
+    }
+}
+
+/// The key a cipher's fields are actually sealed under. Ciphers that carry
+/// a cipher-level `key` (type-2 EncString) wrap a per-cipher symmetric key
+/// under the container key; unwrap and use it. Everything else uses the
+/// container key directly. A present-but-failing unwrap is a real error
+/// (wrong/stale container key), not a skip.
+fn effective_key(
+    cipher_key_field: Option<&str>,
+    container: &SymmetricKey,
+) -> Result<SymmetricKey, crate::crypto::CryptoError> {
+    match cipher_key_field.filter(|k| !k.is_empty()) {
+        None => Ok(container.clone()),
+        Some(k) => {
+            let es = EncString::parse(k)?;
+            SymmetricKey::from_64(&es.decrypt_symmetric(container)?)
+        }
     }
 }
 

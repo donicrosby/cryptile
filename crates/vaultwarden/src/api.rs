@@ -309,6 +309,11 @@ pub struct Cipher {
     pub organization_id: Option<String>,
     #[serde(default)]
     pub collection_ids: Option<Vec<String>>,
+    /// Cipher-level encryption key (type-2 EncString wrapping a 64-byte
+    /// symmetric key under the container key). Present only on servers
+    /// with per-cipher keys enabled; absent/empty on older items.
+    #[serde(default)]
+    pub key: Option<String>,
     #[serde(default)]
     pub login: Option<LoginData>,
     #[serde(default)]

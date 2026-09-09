@@ -45,7 +45,9 @@ Spec-driven: every feature lands as an OpenSpec change proposal before code.
 
 `vw://collection/item#field` — every item type maps into one flat field bag.
 `#password` is the default field when a ref names none. Names are stable;
-custom fields join the bag under their own (decrypted) name.
+custom fields join the bag under their own (decrypted) name. Items sealed
+under a cipher-level key (servers with per-cipher encryption) are unwrapped
+transparently.
 
 | Item type | Fields |
 |---|---|

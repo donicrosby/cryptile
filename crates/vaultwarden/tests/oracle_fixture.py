@@ -118,6 +118,14 @@ def main():
     multi_u2 = enc2(org_enc, org_mac, b"https://b.example.com")
     multi_u3 = enc2(org_enc, org_mac, b"https://c.example.com")
 
+    # Cipher-level key: per-cipher 64B key wrapped under the org key; the
+    # cipher's fields are sealed under the per-cipher key, not the org key.
+    cipher_k_enc = os.urandom(32)
+    cipher_k_mac = os.urandom(32)
+    wrapped_cipher_key = enc2(org_enc, org_mac, cipher_k_enc + cipher_k_mac)
+    ckey_name = enc2(cipher_k_enc, cipher_k_mac, b"per-cipher-key-note")
+    ckey_notes = enc2(cipher_k_enc, cipher_k_mac, b"sealed under its own key")
+
     fixture = {
         "email": email,
         "password": password,
@@ -177,6 +185,12 @@ def main():
             "uris": [multi_u1, multi_u2, multi_u3],
             "id": "c7",
         },
+        "cipherkey": {
+            "key": wrapped_cipher_key,
+            "name": ckey_name,
+            "notes": ckey_notes,
+            "id": "c8",
+        },
         "expect": {
             "personal_item_password": "personal-secret",
             "org_item_password": " hunter2-org",
@@ -192,6 +206,7 @@ def main():
             "sshkey_key_fingerprint": "SHA256:abc123",
             "multiuri_uri": "https://a.example.com",
             "multiuri_uris": "https://a.example.com\nhttps://b.example.com\nhttps://c.example.com",
+            "cipherkey_notes": "sealed under its own key",
         },
     }
     d = os.path.dirname(os.path.abspath(__file__))

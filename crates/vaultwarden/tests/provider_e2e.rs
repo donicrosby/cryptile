@@ -140,6 +140,15 @@ async fn full_login_sync_get_roundtrip() {
                     },
                     "type": 1,
                 },
+                {
+                    "id": fx["cipherkey"]["id"],
+                    "name": fx["cipherkey"]["name"],
+                    "key": fx["cipherkey"]["key"],
+                    "notes": fx["cipherkey"]["notes"],
+                    "organizationId": fx["org"]["org_id"],
+                    "collectionIds": [fx["org"]["collection"]],
+                    "type": 2,
+                },
             ],
         })))
         .mount(&server)
@@ -192,7 +201,7 @@ async fn full_login_sync_get_roundtrip() {
     // list secrets in shared
     let shared = nss.iter().find(|n| n.name == "shared").unwrap();
     let metas = provider.list_secrets(&session, shared).await.unwrap();
-    assert_eq!(metas.len(), 6);
+    assert_eq!(metas.len(), 7);
     let names: Vec<&str> = metas.iter().map(|m| m.name.as_str()).collect();
     assert!(names.contains(&"smtp"));
     assert!(names.contains(&"lease-key"));
@@ -200,6 +209,7 @@ async fn full_login_sync_get_roundtrip() {
     assert!(names.contains(&"passport"));
     assert!(names.contains(&"bootstrap-node"));
     assert!(names.contains(&"multi-uri"));
+    assert!(names.contains(&"per-cipher-key-note"));
 
     // secure note: notes field
     let r = Ref::parse("vw://shared/lease-key#notes").unwrap();
@@ -255,5 +265,14 @@ async fn full_login_sync_get_roundtrip() {
     assert_eq!(
         secret.field("uris").unwrap().expose_secret(),
         fx["expect"]["multiuri_uris"].as_str().unwrap()
+    );
+
+    // cipher-level key: fields sealed under the per-cipher key, not the org
+    // key. get must unwrap cipher.key under the org key first.
+    let r = Ref::parse("vw://shared/per-cipher-key-note#notes").unwrap();
+    let secret = provider.get_secret(&session, &r).await.unwrap();
+    assert_eq!(
+        secret.field("notes").unwrap().expose_secret(),
+        fx["expect"]["cipherkey_notes"].as_str().unwrap()
     );
 }
