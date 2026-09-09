@@ -6,10 +6,18 @@ the agent never holds your master password.
 
 ## 0. Threat model in one paragraph
 
-You create a dedicated VW **organization** ("hermes") with one **collection**
-("shared"). The Hermes host logs in as a dedicated **service account**
-(`svc-hermes@…`) that is a member of that org and can see *only* that
-collection. cryptile seals the service account's session under a keyring
+You create a dedicated VW **organization** containing one or more
+**collections**, and the Hermes host logs in as a dedicated **service
+account** that is a member of that org and can see *only* those
+collections. Nothing in cryptile is tied to specific names: the org and
+collection names below ("hermes" / "shared") are just the layout this guide
+walks through — cryptile discovers whatever organizations and collections
+the logged-in account can see at sync time, so use whatever naming fits
+your vault. Every `vw://<collection>/<item>#<field>` ref and
+`cryptile export --namespace <collection>` simply names into that
+discovered set (the personal vault is the `personal` namespace).
+
+cryptile seals the service account's session under a keyring
 passphrase (Argon2id + AES-256-GCM envelope, 0600 file). Hermes receives
 the passphrase through its `.env` at startup and uses it to resolve
 individual secrets on demand. The VW master password is typed once, at
@@ -23,21 +31,22 @@ the reference stack here is VW 1.37.2. Requirements:
 
 - `SIGNUPS_ALLOWED=true` long enough to register the service account (or use
   an invite), then lock signups back down.
-- Admin panel → Organizations → create org **hermes** (or use an existing one;
-  the org name is the namespace in refs).
-- Create collection **shared** inside the org.
+- Admin panel → Organizations → create your org, e.g. **hermes** (or use an
+  existing one; the name is arbitrary).
+- Create one or more collections inside the org, e.g. **shared** (collection
+  names are the namespaces in refs and `export --namespace`).
 - Register a user `svc-hermes@yourdomain` (email+master password you control;
   this is *not* your personal login).
 - Invite that user to the org, confirm membership, grant access to the
-  **shared** collection only (Access Control: "This collection" role).
+  collections you created only (Access Control: "This collection" role).
 
 > VW note: an org owner must *confirm* the new member before org ciphers
 > sync. In the admin panel or web vault, check the member shows confirmed.
 
-## 2. Put secrets in the shared collection
+## 2. Put secrets in the collection
 
-In the web vault, org **hermes** → collection **shared** → New item. Item
-name becomes the middle of the ref; fields become the fragment:
+In the web vault, your org → your collection → New item. Item name becomes
+the middle of the ref; fields become the fragment:
 
 ```
 vw://shared/Postgres HQ#password

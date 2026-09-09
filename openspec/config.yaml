@@ -24,8 +24,10 @@ context: |
     (composition root — sole importer of backend crates). CLI code must never
     name a backend concrete type.
   - Secrets are typed (SecretString/ExposeSecret), never plain String.
-  - Tiers 1+2 only (dedicated VW service account, org "hermes", collection
-    "shared"). Tier 3 broker is out of scope permanently unless user asks.
+  - Tiers 1+2 only (dedicated VW service account; org/collection names are
+    fully configurable — cryptile discovers whatever the account can see,
+    "hermes"/"shared" is just the docs example). Tier 3 broker is out of
+    scope permanently unless user asks.
 
   Clean-room constraints:
   - NO bitwarden_license code, NO bitwarden-sdk (GPL), NO Vaultwarden AGPL
