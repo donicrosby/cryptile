@@ -7,10 +7,17 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: weekly
+      interval: daily
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # rsa (0.9.x) still consumes digest 0.10; sha1 0.11 needs digest 0.11.
+      # Merging sha1 >= 0.11 yields two sha1/digest generations and breaks
+      # Oaep::new::<sha1::Sha1>() in crates/vaultwarden. Revisit when rsa
+      # releases a digest-0.11 generation.
+      - dependency-name: "sha1"
+        versions: [">=0.11"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
