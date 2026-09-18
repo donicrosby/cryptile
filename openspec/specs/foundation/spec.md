@@ -378,3 +378,62 @@ first present non-empty field. Explicitly selected fields SHALL NOT fall back.
 #### Scenario: Empty fields are skipped
 - WHEN the first chain field exists but is empty
 - THEN resolution moves to the next chain field rather than returning empty
+
+### Requirement: Bitwarden client identification headers
+
+The vaultwarden backend SHALL send `Bitwarden-Client-Name: web` and
+`Bitwarden-Client-Version: 2024.12.0` on every HTTP request it issues to the
+server, including requests from in-crate debug tooling, because servers gate
+sync payload completeness (notably type-5 SSH-key ciphers) on a minimum client
+version. The version value SHALL be a single named constant with a rationale
+comment citing the sanctioned gold source (rbw) that pins it.
+
+#### Scenario: every request carries the headers
+
+- **WHEN** any request is issued through the provider's HTTP client, including
+  identity token calls, sync, cipher get, and collection list
+- **THEN** the request carries both client identification headers
+
+#### Scenario: version-gated ciphers are delivered
+
+- **WHEN** the server's sync payload omits type-5 (SSH key) ciphers for
+  unversioned clients
+- **THEN** the same server includes them in the payload for cryptile's requests,
+  and `get` on a shared SSH-key item succeeds end-to-end
+
+#### Scenario: debug tooling inherits the headers
+
+- **WHEN** an in-crate debug example issues a raw request outside the provider
+  client
+- **THEN** it uses a client built by the crate's helper so the captured wire
+  state matches what the provider itself sees
+
+#### Scenario: header regression fails the suite
+
+- **WHEN** the wiremock e2e mock for a request class receives a call missing
+  either client identification header
+- **THEN** the match fails and the test suite reports the regression
+
+### Requirement: SSH agent hand-off on get
+
+The CLI SHALL accept an opt-in `--agent` flag on `get` that offers the
+fetched value to the user's running ssh-agent (via `ssh-add` reading
+standard input) when and only when the value is an SSH private key.
+
+#### Scenario: key piped to agent without disk contact
+
+- WHEN `get --agent` resolves a ref whose value is an SSH private key and
+  `SSH_AUTH_SOCK` is set with a reachable agent
+- THEN the key is piped to `ssh-add` over stdin (never written to a file)
+  and the fetched value still prints on stdout unchanged
+
+#### Scenario: non-key values are never offered
+
+- WHEN `get --agent` resolves a ref whose value is not an SSH private key
+- THEN no child process is spawned and the value prints as usual
+
+#### Scenario: best-effort degradation
+
+- WHEN the agent is absent, unreachable, or refuses the key
+- THEN the fetch still succeeds with its normal exit code and the value
+  still prints, with at most a one-line stderr note

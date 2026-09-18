@@ -17,4 +17,4 @@
 - [x] 6. README section (SSH agent hand-off) + 0.2.0 version bump (shared
   with client-version-header). Verify: README renders, `--version` shows
   0.2.0.
-- [ ] 7. Commit, push, CI green, archive change.
+- [x] 7. Commit, push, CI green, archive change.

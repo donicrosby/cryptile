@@ -26,7 +26,7 @@
   count > 4 and get exit 0.
 - [x] 6. Gates: `cargo fmt --all`; `cargo clippy --workspace --all-targets`
   zero warnings; `cargo test --workspace` green. Verify: all three exit 0.
-- [ ] 7. Commit (conventional: `fix(vaultwarden): send client identification
+- [x] 7. Commit (conventional: `fix(vaultwarden): send client identification
   headers so sync delivers type-5 ciphers`), push via gh credential helper,
   watch CI green, `openspec validate --strict`, archive the change, commit the
   archive. Verify: CI green on main + `openspec list` shows no active
