@@ -3,8 +3,47 @@
 //! HTTP client for the Bitwarden/Vaultwarden identity + API endpoints.
 //! Transport only — no crypto here, no secrets in logs.
 
+use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Deserialize;
 use thiserror::Error;
+
+/// Client identification sent on EVERY request. Servers gate sync payload
+/// completeness on a minimum client version: without a sufficiently new
+/// `Bitwarden-Client-Version`, type-5 (SSH-key) ciphers are silently omitted
+/// from `/api/sync` — probed live on our harness (VW 1.37.2, 2026-09-18):
+/// no header or a stale version drops type-5 org ciphers from every account's
+/// sync, `2024.12.x` and `2026.6.0` deliver them. The pinned value matches
+/// rbw (MIT, sanctioned gold source), which sends `2024.12.0` on its
+/// requests; cryptile's own crate version (0.1.0) would classify as ancient.
+pub const CLIENT_VERSION: &str = "2024.12.0";
+/// Official web-vault client name; paired with [`CLIENT_VERSION`].
+pub const CLIENT_NAME: &str = "web";
+
+/// Default headers every cryptile-issued request must carry.
+pub fn client_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "Bitwarden-Client-Name",
+        HeaderValue::from_static(CLIENT_NAME),
+    );
+    headers.insert(
+        "Bitwarden-Client-Version",
+        HeaderValue::from_static(CLIENT_VERSION),
+    );
+    headers
+}
+
+/// A bare `reqwest::Client` that still carries the client identification
+/// headers — for debug examples that issue raw requests outside `Client`.
+/// Bare clients report a different vault than the provider sees (they are
+/// why `dump-sync`/`raw-sync` once claimed a shared SSH key was missing).
+pub fn bare_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent(concat!("cryptile/", env!("CARGO_PKG_VERSION")))
+        .default_headers(client_headers())
+        .build()
+        .expect("static client config cannot fail to build")
+}
 
 /// Transport-layer failures mapped from reqwest.
 #[derive(Debug, Error)]
@@ -86,6 +125,7 @@ impl Client {
     pub fn new(identity_url: String, api_url: String, device_id: String) -> Result<Self, ApiError> {
         let http = reqwest::Client::builder()
             .user_agent(concat!("cryptile/", env!("CARGO_PKG_VERSION")))
+            .default_headers(client_headers())
             .build()
             .map_err(|e| ApiError::Transport(e.to_string()))?;
         Ok(Self {
@@ -114,11 +154,6 @@ impl Client {
         let resp = self
             .http
             .post(url)
-            .header("Bitwarden-Client-Name", "web")
-            .header(
-                "Bitwarden-Client-Version",
-                option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0"),
-            )
             .form(form)
             .send()
             .await

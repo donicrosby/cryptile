@@ -77,13 +77,14 @@ async fn login_challenge_without_code_source_exits_3_with_hint() {
         .await;
 
     let tmp = tempfile::tempdir().unwrap();
-    let assert = login_cmd(&server, &fx, tmp.path())
-        .write_stdin("")
-        .assert();
+    let assert = login_cmd(&server, &fx, tmp.path()).write_stdin("").assert();
     let output = assert.failure().get_output().to_owned();
     assert_eq!(output.status.code(), Some(3), "stderr: {:?}", output.stderr);
     let err = String::from_utf8(output.stderr).unwrap();
-    assert!(err.contains("--2fa-code"), "hint must name --2fa-code: {err}");
+    assert!(
+        err.contains("--2fa-code"),
+        "hint must name --2fa-code: {err}"
+    );
     assert!(err.contains("--2fa-env"), "hint must name --2fa-env: {err}");
 }
 
@@ -133,10 +134,7 @@ async fn login_with_2fa_env_resubmits_once_and_seals_session() {
     let first = String::from_utf8(token_posts[0].body.clone()).unwrap();
     let second = String::from_utf8(token_posts[1].body.clone()).unwrap();
     assert!(!first.contains("twoFactorToken"));
-    assert!(
-        second.contains("twoFactorToken=654321")
-            && second.contains("twoFactorProvider=0")
-    );
+    assert!(second.contains("twoFactorToken=654321") && second.contains("twoFactorProvider=0"));
     // Session actually sealed: both state files exist.
     assert!(tmp.path().join("config.json").exists());
     assert!(tmp.path().join("keyring").exists());

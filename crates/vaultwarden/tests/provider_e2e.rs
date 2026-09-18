@@ -8,7 +8,7 @@
 use cryptile_core::provider::{LoginParams, Provider, ProviderError, SecondFactor};
 use cryptile_core::{ExposeSecret, Ref, SecretString};
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use cryptile_vaultwarden::VaultwardenProvider;
@@ -28,9 +28,18 @@ async fn full_login_sync_get_roundtrip() {
         .map(|u| serde_json::json!({ "uri": u }))
         .collect();
 
-    // prelogin
+    // prelogin — every request class must carry client identification
+    // (CLIENT_NAME/CLIENT_VERSION); a stripped header fails here.
     Mock::given(method("POST"))
         .and(path("/identity/accounts/prelogin"))
+        .and(header(
+            "Bitwarden-Client-Name",
+            cryptile_vaultwarden::api::CLIENT_NAME,
+        ))
+        .and(header(
+            "Bitwarden-Client-Version",
+            cryptile_vaultwarden::api::CLIENT_VERSION,
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "kdf": 0,
             "kdfIterations": fx["iterations"],
@@ -41,6 +50,14 @@ async fn full_login_sync_get_roundtrip() {
     // token
     Mock::given(method("POST"))
         .and(path("/identity/connect/token"))
+        .and(header(
+            "Bitwarden-Client-Name",
+            cryptile_vaultwarden::api::CLIENT_NAME,
+        ))
+        .and(header(
+            "Bitwarden-Client-Version",
+            cryptile_vaultwarden::api::CLIENT_VERSION,
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "access_token": "at-token",
             "refresh_token": "rt-token",
@@ -52,9 +69,18 @@ async fn full_login_sync_get_roundtrip() {
         .mount(&server)
         .await;
 
-    // sync
+    // sync — the header is load-bearing: version-gating servers omit
+    // type-5 (SSH-key) ciphers from this payload without it.
     Mock::given(method("GET"))
         .and(path("/api/sync"))
+        .and(header(
+            "Bitwarden-Client-Name",
+            cryptile_vaultwarden::api::CLIENT_NAME,
+        ))
+        .and(header(
+            "Bitwarden-Client-Version",
+            cryptile_vaultwarden::api::CLIENT_VERSION,
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "profile": {
                 "id": "u1",
@@ -157,6 +183,14 @@ async fn full_login_sync_get_roundtrip() {
     // collections
     Mock::given(method("GET"))
         .and(path("/api/collections"))
+        .and(header(
+            "Bitwarden-Client-Name",
+            cryptile_vaultwarden::api::CLIENT_NAME,
+        ))
+        .and(header(
+            "Bitwarden-Client-Version",
+            cryptile_vaultwarden::api::CLIENT_VERSION,
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "data": [{
                 "id": fx["org"]["collection"],
@@ -317,7 +351,7 @@ async fn two_factor_challenge_resubmit_roundtrip() {
     let fx = fixture();
     let server = MockServer::start().await;
 
-    let prelogin = Mock::given(method("POST"))
+    Mock::given(method("POST"))
         .and(path("/identity/accounts/prelogin"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "kdf": 0,
@@ -335,7 +369,7 @@ async fn two_factor_challenge_resubmit_roundtrip() {
         "TwoFactorProviders2".to_string(),
         json!({"0": null, "1": null}),
     );
-    let first_grant = Mock::given(method("POST"))
+    Mock::given(method("POST"))
         .and(path("/identity/connect/token"))
         .and(wiremock::matchers::body_string_contains("grant_type"))
         .and(wiremock::matchers::body_string_contains("username"))
@@ -346,7 +380,7 @@ async fn two_factor_challenge_resubmit_roundtrip() {
 
     // Resubmit: priority 1 wins when the form carries the token; asserts the
     // exact wire field names from CAPTURES.md.
-    let resubmit = Mock::given(method("POST"))
+    Mock::given(method("POST"))
         .and(path("/identity/connect/token"))
         .and(wiremock::matchers::body_string_contains(
             "twoFactorToken=123456",
@@ -387,7 +421,7 @@ async fn two_factor_challenge_resubmit_roundtrip() {
 
     // Second leg: the CLI resubmits with the chosen factor; the mock pins the
     // exact form fields, and a session that unwraps proves the full chain.
-    let session = provider
+    let _session = provider
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
@@ -398,7 +432,6 @@ async fn two_factor_challenge_resubmit_roundtrip() {
         })
         .await
         .expect("resubmit with the 2FA token must yield a session");
-    drop(session);
 
     // Verify the exact wire exchange from the recorded requests: the first
     // token call must carry no 2FA fields, the second must carry both fields
@@ -439,7 +472,7 @@ async fn two_factor_wrong_code_is_auth_error() {
         .mount(&server)
         .await;
 
-    let wrong = Mock::given(method("POST"))
+    let _wrong = Mock::given(method("POST"))
         .and(path("/identity/connect/token"))
         .respond_with(
             ResponseTemplate::new(400).set_body_json(fx["twofactor"]["wrong_code"].clone()),
@@ -463,5 +496,4 @@ async fn two_factor_wrong_code_is_auth_error() {
         matches!(err, ProviderError::Auth(_)),
         "expected typed Auth error, got: {err:?}"
     );
-    drop(wrong);
 }

@@ -12,7 +12,7 @@
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 use cryptile_core::SecretString;
-use cryptile_vaultwarden::api::Client;
+use cryptile_vaultwarden::api::{bare_client, Client};
 use cryptile_vaultwarden::crypto::{unwrap_org_key, EncString, SymmetricKey};
 use std::fs;
 
@@ -156,7 +156,7 @@ fn main() {
 
     // Raw JSON of the same cipher: fields the typed struct drops.
     {
-        let http = reqwest::Client::new();
+        let http = bare_client();
         let resp = rt
             .block_on(
                 http.get(format!("{server}/api/ciphers/{cipher_id}"))
@@ -249,7 +249,7 @@ fn main() {
 
     // Per-cipher key: raw JSON "key" field, wrapped under the container key.
     {
-        let http = reqwest::Client::new();
+        let http = bare_client();
         let resp = rt
             .block_on(
                 http.get(format!("{server}/api/ciphers/{cipher_id}"))

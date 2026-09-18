@@ -6,6 +6,7 @@
 //! stdout only in `get` (single field), and never in logs. Sessions persist
 //! passphrase-sealed in the keyring; tokens rotate silently on 401 (4.5).
 
+mod agent;
 mod ops;
 mod registry;
 mod state;
@@ -67,6 +68,10 @@ enum Command {
         /// Ignore the sync cache for this fetch (full sync, rewrite cache)
         #[arg(long)]
         refresh_cache: bool,
+        /// Add the fetched key to a running ssh-agent when the value is an
+        /// SSH private key (best effort; never fails the fetch)
+        #[arg(long)]
+        agent: bool,
     },
     /// List namespaces, or items in one namespace (metadata only)
     List {
@@ -177,10 +182,7 @@ fn resolve_second_factor(
             _ => return Err(format!("env var '{var}' (2FA code) is not set")),
         }
     } else if std::io::stdin().is_terminal() {
-        match read_secret(&format!("{provider_tag} code: ")) {
-            Ok(c) => c,
-            Err(e) => return Err(e),
-        }
+        read_secret(&format!("{provider_tag} code: "))?
     } else {
         return Err("two-factor required; re-run with --2fa-code <code>, \
              --2fa-env VAR, or interactively to prompt"
@@ -339,6 +341,7 @@ async fn main() -> ExitCode {
             r#ref,
             passphrase_env,
             refresh_cache,
+            agent: add_to_agent,
         } => {
             let r = match Ref::parse(&r#ref) {
                 Ok(r) => r,
@@ -358,9 +361,15 @@ async fn main() -> ExitCode {
                     Err(e) => return die(e, 2),
                 };
             let handle_before = session.handle.clone();
+            let item_label = r.locus.rsplit('/').next().unwrap_or("").to_string();
             match ops::get(provider.as_ref(), session, &r).await {
                 Ok((sess, value)) => {
                     reseal(&state, &sess, &passphrase, &handle_before);
+                    if add_to_agent {
+                        // Refusal is not fatal: the fetched value still
+                        // prints below regardless of the agent's mood.
+                        let _ = agent::add_to_agent(&value, &item_label);
+                    }
                     println!("{value}");
                     ExitCode::SUCCESS
                 }

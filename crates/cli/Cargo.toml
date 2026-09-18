@@ -27,4 +27,5 @@ rpassword.workspace = true
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
+base64.workspace = true
 wiremock.workspace = true

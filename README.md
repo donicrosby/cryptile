@@ -71,6 +71,19 @@ missing field fails with the field-not-present error.
 | SSH Key | `private_key`, `public_key`, `key_fingerprint` |
 | any | `notes`, custom fields |
 
+## SSH agent hand-off
+
+```sh
+cryptile get vw://shared/Deploy Key#private_key --agent
+```
+
+`--agent` pipes a fetched SSH private key to a running ssh-agent
+(`ssh-add -` over stdin — the key never touches disk). Only values that
+look like SSH private keys are offered; passwords and other fields are
+never piped anywhere. Best effort by design: no agent, a dead socket, or
+a refusal never fails the fetch — the value still prints, with at most a
+one-line stderr note.
+
 ## Development
 
 ```sh
