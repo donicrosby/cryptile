@@ -123,6 +123,8 @@ async fn env(cache: bool) -> Env {
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+
+            second_factor: None,
         })
         .await
         .unwrap();

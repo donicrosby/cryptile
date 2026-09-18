@@ -19,6 +19,12 @@ pub enum ApiError {
     },
     #[error("malformed response: {0}")]
     Malformed(String),
+    /// The identity token endpoint demanded a second factor. Carries the
+    /// whole error body (JSON when parseable) so the provider can decode
+    /// `TwoFactorProviders` / `TwoFactorProviders2`.
+    /// Wire shape pinned by tests/fixtures/challenge.json (VW 1.37.2).
+    #[error("two-factor challenge: {0}")]
+    TwoFactorChallenge(String),
 }
 
 impl ApiError {
@@ -130,6 +136,11 @@ impl Client {
             .await
             .map_err(|e| ApiError::Transport(e.to_string()))?;
         if !(200..300).contains(&status) {
+            // 2FA challenge: 400 invalid_grant "Two factor required."
+            // (rbw api.rs ConnectErrorRes + live capture challenge.json).
+            if status == 400 && body.contains("Two factor required.") {
+                return Err(ApiError::TwoFactorChallenge(body));
+            }
             return Err(ApiError::Status {
                 op,
                 status,
@@ -156,25 +167,41 @@ impl Client {
     }
 
     /// Password grant. `auth_hash_b64` is the base64 auth hash, never plaintext.
-    #[tracing::instrument(skip(self, auth_hash_b64), fields(op = "token_password"))]
+    /// `second_factor` carries the answer when retrying a 2FA challenge:
+    /// (wire provider id, token). Wire fields `twoFactorProvider` /
+    /// `twoFactorToken` pinned by fixtures/CAPTURES.md + rbw ConnectTokenReq.
+    #[tracing::instrument(
+        skip(self, auth_hash_b64, second_factor),
+        fields(op = "token_password")
+    )]
     pub async fn token_password(
         &self,
         email: &str,
         auth_hash_b64: &str,
+        second_factor: Option<(u8, &str)>,
     ) -> Result<TokenResponse, ApiError> {
+        let mut form = vec![
+            ("grant_type", "password"),
+            ("username", email),
+            ("password", auth_hash_b64),
+            ("scope", "api offline_access"),
+            ("client_id", "web"),
+            ("deviceType", "14"),
+            ("deviceIdentifier", self.device_id.as_str()),
+            ("deviceName", "cryptile"),
+        ];
+        let provider_id;
+        let token_str;
+        if let Some((provider, token)) = second_factor {
+            provider_id = provider.to_string();
+            token_str = token.to_string();
+            form.push(("twoFactorProvider", provider_id.as_str()));
+            form.push(("twoFactorToken", token_str.as_str()));
+        }
         self.post_form(
             &format!("{}/connect/token", self.identity_url),
             "login",
-            &[
-                ("grant_type", "password"),
-                ("username", email),
-                ("password", auth_hash_b64),
-                ("scope", "api offline_access"),
-                ("client_id", "web"),
-                ("deviceType", "14"),
-                ("deviceIdentifier", &self.device_id),
-                ("deviceName", "cryptile"),
-            ],
+            &form,
         )
         .await
     }

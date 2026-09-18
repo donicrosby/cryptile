@@ -5,7 +5,7 @@
 //! user-key unwrap → private-key unwrap → org-key unwrap → cipher decrypt
 //! → field mapping, plus ref resolution by collection NAME.
 
-use cryptile_core::provider::{LoginParams, Provider};
+use cryptile_core::provider::{LoginParams, Provider, ProviderError, SecondFactor};
 use cryptile_core::{ExposeSecret, Ref, SecretString};
 use serde_json::json;
 use wiremock::matchers::{method, path};
@@ -173,6 +173,7 @@ async fn full_login_sync_get_roundtrip() {
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            second_factor: None,
         })
         .await
         .unwrap();
@@ -305,4 +306,162 @@ async fn full_login_sync_get_roundtrip() {
         secret.primary_value().unwrap().expose_secret(),
         fx["expect"]["org_item_password"].as_str().unwrap()
     );
+}
+
+/// 2FA leg, wire pinned to fixtures/CAPTURES.md (VW 1.37.2 live capture):
+/// password grant → 400 challenge (both provider spellings) → typed
+/// `TwoFactorRequired` → resubmit with `twoFactorToken`/`twoFactorProvider`
+/// → session unwraps the user key. Wrong code → typed AUTH error.
+#[tokio::test]
+async fn two_factor_challenge_resubmit_roundtrip() {
+    let fx = fixture();
+    let server = MockServer::start().await;
+
+    let prelogin = Mock::given(method("POST"))
+        .and(path("/identity/accounts/prelogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "kdf": 0,
+            "kdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+
+    // First password grant (no 2FA fields): challenge with BOTH spellings —
+    // the live capture uses the array form; the map form duplicates id "1"
+    // (email) to prove the decoder merges both without duplicates.
+    let challenge_body = fx["twofactor"]["challenge"].clone();
+    let mut challenge = challenge_body.as_object().unwrap().clone();
+    challenge.insert(
+        "TwoFactorProviders2".to_string(),
+        json!({"0": null, "1": null}),
+    );
+    let first_grant = Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .and(wiremock::matchers::body_string_contains("grant_type"))
+        .and(wiremock::matchers::body_string_contains("username"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(challenge))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+
+    // Resubmit: priority 1 wins when the form carries the token; asserts the
+    // exact wire field names from CAPTURES.md.
+    let resubmit = Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .and(wiremock::matchers::body_string_contains(
+            "twoFactorToken=123456",
+        ))
+        .and(wiremock::matchers::body_string_contains(
+            "twoFactorProvider=0",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "at-token",
+            "refresh_token": "rt-token",
+            "expires_in": 7200,
+            "key": fx["protected_user_key"],
+            "Kdf": 0,
+            "KdfIterations": fx["iterations"],
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+
+    let provider = VaultwardenProvider::new(&server.uri()).unwrap();
+
+    // First leg: challenge decoded into sorted, de-duplicated backend-agnostic
+    // tags ("0" -> totp, "1" -> email).
+    let err = provider
+        .login(LoginParams {
+            account: fx["email"].as_str().unwrap().into(),
+            secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            second_factor: None,
+        })
+        .await
+        .expect_err("challenge must surface as an error");
+    match &err {
+        ProviderError::TwoFactorRequired { providers } => {
+            assert_eq!(providers, &vec!["totp".to_string(), "email".to_string()])
+        }
+        other => panic!("expected TwoFactorRequired, got: {other:?}"),
+    }
+
+    // Second leg: the CLI resubmits with the chosen factor; the mock pins the
+    // exact form fields, and a session that unwraps proves the full chain.
+    let session = provider
+        .login(LoginParams {
+            account: fx["email"].as_str().unwrap().into(),
+            secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            second_factor: Some(SecondFactor {
+                provider_tag: "totp".into(),
+                code: SecretString::new(fx["twofactor"]["code"].as_str().unwrap().into()),
+            }),
+        })
+        .await
+        .expect("resubmit with the 2FA token must yield a session");
+    drop(session);
+
+    // Verify the exact wire exchange from the recorded requests: the first
+    // token call must carry no 2FA fields, the second must carry both fields
+    // verbatim (CAPTURES.md), and the code itself must never leak into logs.
+    let requests = server.received_requests().await.unwrap();
+    let token_posts: Vec<&wiremock::Request> = requests
+        .iter()
+        .filter(|r| r.url.path() == "/identity/connect/token")
+        .collect();
+    assert_eq!(token_posts.len(), 2, "exactly two token endpoint calls");
+    let first_body = String::from_utf8(token_posts[0].body.clone()).unwrap();
+    let second_body = String::from_utf8(token_posts[1].body.clone()).unwrap();
+    assert!(
+        !first_body.contains("twoFactorToken"),
+        "first grant must not carry 2FA fields"
+    );
+    assert!(
+        second_body.contains("twoFactorToken=123456")
+            && second_body.contains("twoFactorProvider=0"),
+        "resubmit must carry the captured wire fields verbatim"
+    );
+}
+
+/// Wrong TOTP code: VW answers 400 "Invalid TOTP code!" (wrong-code.json
+/// capture) — NOT a two-factor challenge. Must surface as the typed AUTH
+/// error (exit code 3 family), never as TwoFactorRequired.
+#[tokio::test]
+async fn two_factor_wrong_code_is_auth_error() {
+    let fx = fixture();
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/identity/accounts/prelogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "kdf": 0,
+            "kdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+
+    let wrong = Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(fx["twofactor"]["wrong_code"].clone()),
+        )
+        .mount(&server)
+        .await;
+
+    let provider = VaultwardenProvider::new(&server.uri()).unwrap();
+    let err = provider
+        .login(LoginParams {
+            account: fx["email"].as_str().unwrap().into(),
+            secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            second_factor: Some(SecondFactor {
+                provider_tag: "totp".into(),
+                code: SecretString::new(fx["twofactor"]["wrong"].as_str().unwrap().into()),
+            }),
+        })
+        .await
+        .expect_err("wrong code must fail");
+    assert!(
+        matches!(err, ProviderError::Auth(_)),
+        "expected typed Auth error, got: {err:?}"
+    );
+    drop(wrong);
 }

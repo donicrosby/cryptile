@@ -14,7 +14,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use cryptile_core::{ExposeSecret, Keyring, Ref};
+use cryptile_core::{ExposeSecret, Keyring, ProviderError, Ref};
 use secrecy::SecretString as SecStr;
 
 use state::{State, StateConfig};
@@ -47,6 +47,16 @@ enum Command {
         /// Read the master password from this env var (agent contexts)
         #[arg(long)]
         master_password_env: Option<String>,
+        /// Prefer this two-factor provider (totp|email|webauthn); default is
+        /// the strongest one the server offers (webauthn > totp > email)
+        #[arg(long = "2fa-provider")]
+        twofa_provider: Option<String>,
+        /// Two-factor code supplied directly (agent contexts)
+        #[arg(long = "2fa-code")]
+        twofa_code: Option<String>,
+        /// Read the two-factor code from this env var (agent contexts)
+        #[arg(long = "2fa-env")]
+        twofa_env: Option<String>,
     },
     /// Print one secret field value (vw://collection/item#field)
     Get {
@@ -95,7 +105,7 @@ fn die_provider(e: cryptile_core::ProviderError) -> ExitCode {
     use cryptile_core::ProviderError::*;
     let code = match e {
         BadRef(_) => 2,
-        Auth(_) | AuthExpired | NoSession | Forbidden(_) => 3,
+        Auth(_) | AuthExpired | NoSession | Forbidden(_) | TwoFactorRequired { .. } => 3,
         Transport(_) | Server(_) | Crypto(_) => 4,
         NotFound(_) => 5,
     };
@@ -121,6 +131,62 @@ fn read_secret(prompt: &str) -> Result<SecStr, String> {
     rpassword::prompt_password(prompt)
         .map(SecStr::from)
         .map_err(|e| e.to_string())
+}
+
+/// Choose the second factor for a challenge: explicit `--2fa-provider`
+/// overrides the preference order webauthn → totp → email; a tag the
+/// backend offered but we cannot answer (e.g. webauthn without the
+/// compile-time feature) is skipped. Code resolution order:
+/// `--2fa-code`, then `--2fa-env`, then TTY prompt. No code source in a
+/// non-interactive context → error naming the flags (exit 3 upstream).
+fn resolve_second_factor(
+    offered: &[String],
+    provider_pref: Option<&str>,
+    code_flag: Option<String>,
+    code_env: Option<&str>,
+) -> Result<cryptile_core::provider::SecondFactor, String> {
+    let answerable = |tag: &str| tag == "totp" || tag == "email";
+    let pick = || -> Result<String, String> {
+        if let Some(p) = provider_pref {
+            if !offered.iter().any(|t| t == p) {
+                return Err(format!(
+                    "server did not offer two-factor provider '{p}' (offered: {})",
+                    offered.join(", ")
+                ));
+            }
+            return Ok(p.to_string());
+        }
+        offered
+            .iter()
+            .find(|t| answerable(t))
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "no answerable two-factor provider in: {}; \
+                     build with --features webauthn for security-key support",
+                    offered.join(", ")
+                )
+            })
+    };
+    let provider_tag = pick()?;
+    let code: SecStr = if let Some(c) = code_flag {
+        SecStr::from(c)
+    } else if let Some(var) = code_env {
+        match std::env::var(var) {
+            Ok(v) if !v.is_empty() => SecStr::from(v),
+            _ => return Err(format!("env var '{var}' (2FA code) is not set")),
+        }
+    } else if std::io::stdin().is_terminal() {
+        match read_secret(&format!("{provider_tag} code: ")) {
+            Ok(c) => c,
+            Err(e) => return Err(e),
+        }
+    } else {
+        return Err("two-factor required; re-run with --2fa-code <code>, \
+             --2fa-env VAR, or interactively to prompt"
+            .into());
+    };
+    Ok(cryptile_core::provider::SecondFactor { provider_tag, code })
 }
 
 /// Install a tracing subscriber only when RUST_LOG asks for one. Default
@@ -169,7 +235,21 @@ async fn main() -> ExitCode {
             account,
             passphrase_env,
             master_password_env,
+            twofa_provider,
+            twofa_code,
+            twofa_env,
         } => {
+            if twofa_code.is_some() && twofa_env.is_some() {
+                return die("--2fa-code and --2fa-env are mutually exclusive".into(), 2);
+            }
+            if let Some(p) = &twofa_provider {
+                if !matches!(p.as_str(), "totp" | "email" | "webauthn") {
+                    return die(
+                        format!("invalid --2fa-provider '{p}' (totp|email|webauthn)"),
+                        2,
+                    );
+                }
+            }
             let passphrase = match passphrase_env {
                 Some(var) => match std::env::var(&var) {
                     Ok(v) => SecStr::from(v),
@@ -201,15 +281,44 @@ async fn main() -> ExitCode {
                 Ok(p) => p,
                 Err(e) => return die(e, 2),
             };
-            let session = match provider
-                .login(cryptile_core::LoginParams {
-                    account: account.clone(),
-                    secret,
-                })
-                .await
-            {
-                Ok(s) => s,
-                Err(e) => return die_provider(e),
+            // Single resubmit, never a loop: the first grant may come back
+            // challenged; the retry carries the resolved second factor. A
+            // second challenge after that is a hard stop (exit 3).
+            let session = {
+                let params = |second: Option<cryptile_core::provider::SecondFactor>| {
+                    cryptile_core::LoginParams {
+                        account: account.clone(),
+                        secret: secret.clone(),
+                        second_factor: second,
+                    }
+                };
+                match provider.login(params(None)).await {
+                    Ok(s) => s,
+                    Err(ProviderError::TwoFactorRequired { providers }) => {
+                        let second = match resolve_second_factor(
+                            &providers,
+                            twofa_provider.as_deref(),
+                            twofa_code.clone(),
+                            twofa_env.as_deref(),
+                        ) {
+                            Ok(s) => s,
+                            Err(msg) => return die(msg, 3),
+                        };
+                        match provider.login(params(Some(second))).await {
+                            Ok(s) => s,
+                            Err(ProviderError::TwoFactorRequired { .. }) => {
+                                return die(
+                                    "server still demands a second factor after the \
+                                     resubmit; refusing to retry"
+                                        .into(),
+                                    3,
+                                )
+                            }
+                            Err(e) => return die_provider(e),
+                        }
+                    }
+                    Err(e) => return die_provider(e),
+                }
             };
             // Cache rotation: keep only when re-logging into the same
             // account; a different account's cache cannot be unsealed

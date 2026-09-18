@@ -126,6 +126,15 @@ def main():
     ckey_name = enc2(cipher_k_enc, cipher_k_mac, b"per-cipher-key-note")
     ckey_notes = enc2(cipher_k_enc, cipher_k_mac, b"sealed under its own key")
 
+    # 2FA wire captures (black-box, VW 1.37.2, fixtures/CAPTURES.md) are
+    # pinned into the fixture verbatim so provider_e2e replays the exact
+    # challenge shapes the live server produced.
+    d = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(d, "fixtures", "challenge.json")) as f:
+        twofactor_challenge = json.load(f)
+    with open(os.path.join(d, "fixtures", "wrong-code.json")) as f:
+        twofactor_wrong_code = json.load(f)
+
     fixture = {
         "email": email,
         "password": password,
@@ -190,6 +199,12 @@ def main():
             "name": ckey_name,
             "notes": ckey_notes,
             "id": "c8",
+        },
+        "twofactor": {
+            "challenge": twofactor_challenge,
+            "wrong_code": twofactor_wrong_code,
+            "code": "123456",
+            "wrong": "000000",
         },
         "expect": {
             "personal_item_password": "personal-secret",

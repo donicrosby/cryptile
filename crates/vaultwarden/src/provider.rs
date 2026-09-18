@@ -129,6 +129,14 @@ fn crypto_err(e: crate::crypto::CryptoError) -> ProviderError {
 
 fn map_api(e: ApiError) -> ProviderError {
     match e {
+        ApiError::TwoFactorChallenge(body) => {
+            // Decode offered providers into backend-agnostic tags. The wire
+            // body keys are numbers-as-strings (["0"]) per the VW 1.37.2
+            // capture; rbw's deserializer accepts numbers and strings.
+            ProviderError::TwoFactorRequired {
+                providers: decode_two_factor_providers(&body),
+            }
+        }
         ApiError::Status { op, status, detail } => match status {
             401 => ProviderError::AuthExpired,
             403 => ProviderError::Forbidden(detail),
@@ -138,6 +146,71 @@ fn map_api(e: ApiError) -> ProviderError {
         },
         other => ProviderError::Transport(other.to_string()),
     }
+}
+
+/// Inverse of the id→tag mapping in [`decode_two_factor_providers`]:
+/// resolve a backend-agnostic tag to its VW wire provider id. Accepts
+/// the bare tags or an `unknown(n)` passthrough.
+pub(crate) fn tag_to_wire_id(tag: &str) -> Option<u8> {
+    match tag {
+        "totp" => Some(0),
+        "email" => Some(1),
+        "webauthn" => Some(7),
+        other => other
+            .strip_prefix("unknown(")
+            .and_then(|rest| rest.strip_suffix(')'))
+            .and_then(|n| n.parse().ok()),
+    }
+}
+
+/// Decode the providers offered by a two-factor challenge body into
+/// backend-agnostic tags: `totp` (0), `email` (1), `webauthn` (7), else
+/// `unknown(n)`. Accepts `TwoFactorProviders` (array) and
+/// `TwoFactorProviders2` (map), either key casing, ids as numbers or
+/// strings; unknown ids never fail the parse.
+pub(crate) fn decode_two_factor_providers(body: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+    let id_to_tag = |n: u64| -> String {
+        match n {
+            0 => "totp".into(),
+            1 => "email".into(),
+            7 => "webauthn".into(),
+            other => format!("unknown({other})"),
+        }
+    };
+    let mut out: Vec<String> = Vec::new();
+    // TwoFactorProviders array: ["0"] (string ids on VW 1.37.2) or [0].
+    for key in ["TwoFactorProviders", "twoFactorProviders"] {
+        if let Some(list) = v.get(key).and_then(|x| x.as_array()) {
+            for item in list {
+                let id = item
+                    .as_u64()
+                    .or_else(|| item.as_str().and_then(|s| s.parse::<u64>().ok()));
+                if let Some(n) = id {
+                    let tag = id_to_tag(n);
+                    if !out.contains(&tag) {
+                        out.push(tag);
+                    }
+                }
+            }
+        }
+    }
+    // TwoFactorProviders2 map: {"0": null} — string keys, any value.
+    for key in ["TwoFactorProviders2", "twoFactorProviders2"] {
+        if let Some(map) = v.get(key).and_then(|x| x.as_object()) {
+            for k in map.keys() {
+                if let Ok(n) = k.parse::<u64>() {
+                    let tag = id_to_tag(n);
+                    if !out.contains(&tag) {
+                        out.push(tag);
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// KDF params from either prelogin JSON or the token response.
@@ -204,6 +277,17 @@ impl Provider for VaultwardenProvider {
     async fn login(&self, params: LoginParams) -> Result<Session, ProviderError> {
         let email = params.account.clone();
         let password = params.secret;
+        let second = params.second_factor.as_ref().map(|sf| {
+            tag_to_wire_id(&sf.provider_tag)
+                .map(|id| (id, sf.code.expose_secret().to_string()))
+                .ok_or_else(|| {
+                    ProviderError::Server(format!(
+                        "unsupported two-factor provider tag: {}",
+                        sf.provider_tag
+                    ))
+                })
+        });
+        let second = second.transpose()?;
         let pre_raw: serde_json::Value = self.client.prelogin(&email).await.map_err(map_api)?.0;
         let kdf = kdf_from_json(&pre_raw);
         let master_key =
@@ -211,7 +295,11 @@ impl Provider for VaultwardenProvider {
         let hash = auth_hash(password.expose_secret(), &master_key).map_err(crypto_err)?;
         let token = self
             .client
-            .token_password(&email, hash.as_str())
+            .token_password(
+                &email,
+                hash.as_str(),
+                second.as_ref().map(|(p, t)| (*p, t.as_str())),
+            )
             .await
             .map_err(map_api)?;
         // Unwrap now: wrong password must fail at login, not first sync.
@@ -641,4 +729,45 @@ fn base64_encode(b: [u8; 64]) -> String {
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.decode(s).ok()
+}
+
+#[cfg(test)]
+mod two_factor_tests {
+    use super::*;
+
+    // Live-capture challenge shape (fixtures/challenge.json): array of
+    // STRING ids + map spelling, plus a sibling policy field to ignore.
+    #[test]
+    fn decodes_capture_array_and_map_spellings() {
+        let body = r#"{"error":"invalid_grant","error_description":"Two factor required.","TwoFactorProviders":["0"],"TwoFactorProviders2":{"0":null},"MasterPasswordPolicy":{"Object":"masterPasswordPolicy"}}"#;
+        assert_eq!(decode_two_factor_providers(body), vec!["totp"]);
+    }
+
+    // Numbers (rbw accepts both), lowercase keys, and unknown ids all decode;
+    // duplicates across spellings collapse.
+    #[test]
+    fn decodes_numbers_lowercase_and_unknown_ids() {
+        let body = r#"{"twoFactorProviders":[0,1,7],"twoFactorProviders2":{"7":null,"9":null}}"#;
+        assert_eq!(
+            decode_two_factor_providers(body),
+            vec!["totp", "email", "webauthn", "unknown(9)"]
+        );
+    }
+
+    #[test]
+    fn garbage_body_yields_empty() {
+        assert!(decode_two_factor_providers("not json").is_empty());
+        assert!(decode_two_factor_providers("{}").is_empty());
+    }
+
+    #[test]
+    fn tag_roundtrip_matches_id_to_tag() {
+        for (tag, id) in [("totp", 0u8), ("email", 1), ("webauthn", 7)] {
+            assert_eq!(tag_to_wire_id(tag), Some(id));
+        }
+        assert_eq!(tag_to_wire_id("unknown(12)"), Some(12));
+        assert_eq!(tag_to_wire_id("yubikey"), None);
+        assert_eq!(tag_to_wire_id("unknown()"), None);
+        assert_eq!(tag_to_wire_id("unknown(-1)"), None);
+    }
 }

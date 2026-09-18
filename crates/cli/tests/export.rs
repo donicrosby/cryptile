@@ -97,6 +97,7 @@ async fn export_env_passphrase_end_to_end() {
         .login(cryptile_core::LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: secrecy::SecretString::from(fx["password"].as_str().unwrap()),
+            second_factor: None,
         })
         .await
         .unwrap();
@@ -319,6 +320,7 @@ async fn export_proactively_refreshes_near_expiry_session() {
         .login(cryptile_core::LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: secrecy::SecretString::from(fx["password"].as_str().unwrap()),
+            second_factor: None,
         })
         .await
         .unwrap();

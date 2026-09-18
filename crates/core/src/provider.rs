@@ -26,6 +26,21 @@ pub enum ProviderError {
     NoSession,
     #[error("session expired; re-login required")]
     AuthExpired,
+    /// The login path was challenged for a second factor. `providers`
+    /// carries backend-agnostic tags (`totp`, `email`, `webauthn`,
+    /// `unknown(n)`); the CLI resolves one and calls `login` again with
+    /// `LoginParams::second_factor` set.
+    #[error("two-factor required; providers offered: {}", providers.join(", "))]
+    TwoFactorRequired { providers: Vec<String> },
+}
+
+/// A second-factor answer for [`Provider::login`]. Backend-agnostic:
+/// `provider_tag` is `totp` / `email` / `webauthn`; the VW backend maps
+/// tags to its wire-level provider ids.
+#[derive(Debug, Clone)]
+pub struct SecondFactor {
+    pub provider_tag: String,
+    pub code: SecretString,
 }
 
 /// Parameters for [`Provider::login`]. Backend-agnostic fields only; VW
@@ -33,6 +48,9 @@ pub enum ProviderError {
 pub struct LoginParams {
     pub account: String,
     pub secret: SecretString,
+    /// Second-factor answer, present only on the challenge retry call.
+    /// `None` = plain password grant.
+    pub second_factor: Option<SecondFactor>,
 }
 
 /// The backend facade: one trait, every secret backend the same shape.
