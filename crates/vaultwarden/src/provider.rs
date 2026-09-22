@@ -16,13 +16,53 @@ use crate::crypto::{
 };
 use crate::mapping::{map_cipher, resolve_collection};
 
+/// Test seam for the CTAP2 ceremony (tests only — compiled out of release
+/// builds). The closure receives the decoded challenge and returns the
+/// `twoFactorToken` blob, exactly as `perform_assertion` would against a
+/// hardware key.
+#[cfg(all(feature = "webauthn", debug_assertions))]
+type AssertionHook = std::sync::Arc<
+    dyn Fn(
+            &crate::webauthn::WebauthnChallenge,
+        ) -> Result<secrecy::SecretString, crate::webauthn::WebauthnError>
+        + Send
+        + Sync,
+>;
+
 /// Persistent provider handle. Cheap to clone; reqwest client is pooled.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct VaultwardenProvider {
     client: Client,
     /// Optional sync-cache path. `None` disables the warm path entirely
     /// (library use without a state dir).
     cache_path: Option<std::path::PathBuf>,
+    /// When set, this hook produces the `twoFactorToken` blob instead of
+    /// touching a hardware key. CI has no USB device; the manual hardware
+    /// runbook exercises the real path. Never user-facing.
+    #[cfg(all(feature = "webauthn", debug_assertions))]
+    assertion_hook: Option<AssertionHook>,
+}
+
+#[cfg(not(all(feature = "webauthn", debug_assertions)))]
+impl std::fmt::Debug for VaultwardenProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VaultwardenProvider")
+            .field("cache_path", &self.cache_path)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(all(feature = "webauthn", debug_assertions))]
+impl std::fmt::Debug for VaultwardenProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VaultwardenProvider")
+            .field("cache_path", &self.cache_path)
+            .field(
+                "assertion_hook",
+                &self.assertion_hook.as_ref().map(|_| "<hook>"),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 /// The VW session state carried inside `Session.handle` (opaque JSON).
@@ -58,7 +98,27 @@ impl VaultwardenProvider {
         Ok(Self {
             client: Client::from_base(base_url).map_err(map_api)?,
             cache_path: None,
+            #[cfg(all(feature = "webauthn", debug_assertions))]
+            assertion_hook: None,
         })
+    }
+
+    /// Install a ceremony stand-in (tests only — the hook is compiled out
+    /// of release builds). The closure receives the decoded challenge and
+    /// returns the `twoFactorToken` blob, exactly as `perform_assertion`
+    /// would against a hardware key.
+    #[cfg(all(feature = "webauthn", debug_assertions))]
+    pub fn with_assertion_hook(
+        mut self,
+        hook: impl Fn(
+                &crate::webauthn::WebauthnChallenge,
+            ) -> Result<secrecy::SecretString, crate::webauthn::WebauthnError>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.assertion_hook = Some(std::sync::Arc::new(hook));
+        self
     }
 
     /// Enable the sealed sync cache at this path (`<state>/cache/cipher-index`).
@@ -293,13 +353,17 @@ impl Provider for VaultwardenProvider {
             .transpose()?;
 
         #[cfg(feature = "webauthn")]
-        let second = match second {
+        let (second, webauthn_selected) = match second {
             // WebAuthn (wire 7) has no operator-supplied code: the answer is
-            // produced in `answer_two_factor` from the live challenge, so
-            // the first grant always goes out plain.
-            Some((7u8, _)) => None,
-            other => other,
+            // produced in `answer_two_factor` from the live challenge, so the
+            // first grant always goes out plain. The selection is remembered
+            // so a provider-7 challenge on this call is answered in-place —
+            // the caller's single-resubmit budget never sees it.
+            Some((7u8, _)) => (None, true),
+            other => (other, false),
         };
+        #[cfg(not(feature = "webauthn"))]
+        let webauthn_selected = false;
 
         let pre_raw: serde_json::Value = self.client.prelogin(&email).await.map_err(map_api)?.0;
         let kdf = kdf_from_json(&pre_raw);
@@ -316,11 +380,18 @@ impl Provider for VaultwardenProvider {
             .await;
         // One answer, one resubmit: a 2FA challenge here is either answered
         // (device ceremony or code) and resubmitted exactly once, or fails
-        // typed. No retry loops.
+        // typed. No retry loops. A webauthn-selected login answers a
+        // provider-7 challenge inside this call; a challenge on the
+        // *resubmit* means the assertion/code was rejected and surfaces as
+        // typed Auth — never as a second TwoFactorRequired the CLI's
+        // single-resubmit budget would refuse.
         let token = match token {
             Err(ApiError::TwoFactorChallenge(body)) => {
-                let answered =
-                    self.answer_two_factor(&body, second.as_ref().map(|(p, t)| (*p, t.as_str())))?;
+                let answered = if webauthn_selected {
+                    self.answer_two_factor(&body, Some((7u8, "")))?
+                } else {
+                    self.answer_two_factor(&body, second.as_ref().map(|(p, t)| (*p, t.as_str())))?
+                };
                 match answered {
                     Some((provider, token_value)) => self
                         .client
@@ -330,7 +401,12 @@ impl Provider for VaultwardenProvider {
                             Some((provider, token_value.as_str())),
                         )
                         .await
-                        .map_err(map_api)?,
+                        .map_err(|e| match e {
+                            ApiError::TwoFactorChallenge(_) => ProviderError::Auth(format!(
+                                "two-factor {provider} answer rejected: server re-challenged"
+                            )),
+                            other => map_api(other),
+                        })?,
                     None => return Err(map_api(ApiError::TwoFactorChallenge(body))),
                 }
             }
@@ -568,6 +644,11 @@ impl VaultwardenProvider {
                 {
                     let ch = crate::webauthn::challenge_from_body(challenge_body)
                         .map_err(|e| ProviderError::Auth(format!("{e}")))?;
+                    #[cfg(debug_assertions)]
+                    if let Some(hook) = &self.assertion_hook {
+                        let token = hook(&ch).map_err(|e| ProviderError::Auth(format!("{e}")))?;
+                        return Ok(Some((7, token.expose_secret().to_string())));
+                    }
                     let ch = std::clone::Clone::clone(&ch);
                     let token = std::thread::spawn(move || crate::webauthn::perform_assertion(&ch))
                         .join()

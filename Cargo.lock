@@ -655,7 +655,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "cryptile"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "assert_cmd",
  "base64 0.23.1",
@@ -676,7 +676,7 @@ dependencies = [
 
 [[package]]
 name = "cryptile-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "argon2",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "cryptile-vaultwarden"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "argon2",

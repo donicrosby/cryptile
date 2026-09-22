@@ -497,3 +497,169 @@ async fn two_factor_wrong_code_is_auth_error() {
         "expected typed Auth error, got: {err:?}"
     );
 }
+
+/// WebAuthn round-trip budget (fix-webauthn-resubmit-budget): a login()
+/// call carrying a webauthn SecondFactor sends the grant bare, answers the
+/// provider-7 challenge IN-PLACE (ceremony seam-stubbed — CI has no USB
+/// device), and returns a session. The caller must never see a second
+/// TwoFactorRequired; the token endpoint must see exactly two calls (bare
+/// grant, then provider-7 + assertion resubmit). Wire shapes pinned to the
+/// webauthn module's live-capture test constants (harness VW 1.37.2).
+#[cfg(feature = "webauthn")]
+#[tokio::test]
+async fn webauthn_resubmit_within_one_login_call() {
+    let fx = fixture();
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/identity/accounts/prelogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "kdf": 0,
+            "kdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+
+    // Bare grant → provider-7 challenge (live-capture shape from the
+    // webauthn module's tests, harness VW 1.37.2).
+    Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": "invalid_grant",
+            "error_description": "Two factor required.",
+            "TwoFactorProviders": ["7"],
+            "TwoFactorProviders2": {
+                "7": {
+                    "challenge": "Rk9PQmFy",
+                    "rpId": "localhost",
+                    "allowCredentials": [{"id": "Y3JlZC1pZA", "type": "public-key"}],
+                    "timeout": 60000,
+                    "userVerification": "discouraged"
+                }
+            }
+        })))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+
+    // Assertion resubmit wins by priority when the wire fields are present.
+    Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .and(wiremock::matchers::body_string_contains(
+            "twoFactorProvider=7",
+        ))
+        .and(wiremock::matchers::body_string_contains("twoFactorToken="))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "at-token",
+            "refresh_token": "rt-token",
+            "expires_in": 7200,
+            "key": fx["protected_user_key"],
+            "Kdf": 0,
+            "KdfIterations": fx["iterations"],
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+
+    // Ceremony stand-in: proves the decoded challenge reached the seam and
+    // returns the blob the hardware path would assemble.
+    let provider = VaultwardenProvider::new(&server.uri())
+        .unwrap()
+        .with_assertion_hook(|ch| {
+            assert_eq!(ch.rp_id, "localhost");
+            assert_eq!(ch.challenge_b64, "Rk9PQmFy");
+            Ok(cryptile_core::SecretString::from("ASSERTION_BLOB"))
+        });
+
+    // ONE login call: the CLI's webauthn resubmit. Before the fix this
+    // surfaces TwoFactorRequired (fresh challenge on the bare grant) and the
+    // CLI hard-stops; after the fix the provider answers in-place.
+    let _session = provider
+        .login(LoginParams {
+            account: fx["email"].as_str().unwrap().into(),
+            secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            second_factor: Some(SecondFactor {
+                provider_tag: "webauthn".into(),
+                code: SecretString::new("".into()),
+            }),
+        })
+        .await
+        .expect("webauthn login must complete inside one call");
+
+    let requests = server.received_requests().await.unwrap();
+    let token_posts: Vec<&wiremock::Request> = requests
+        .iter()
+        .filter(|r| r.url.path() == "/identity/connect/token")
+        .collect();
+    assert_eq!(token_posts.len(), 2, "bare grant + assertion resubmit");
+    let first_body = String::from_utf8(token_posts[0].body.clone()).unwrap();
+    let second_body = String::from_utf8(token_posts[1].body.clone()).unwrap();
+    assert!(
+        !first_body.contains("twoFactorToken"),
+        "first grant must go out bare to fetch the live challenge"
+    );
+    assert!(
+        second_body.contains("twoFactorProvider=7")
+            && second_body.contains("twoFactorToken=ASSERTION_BLOB"),
+        "resubmit must carry provider 7 and the seam's assertion blob"
+    );
+}
+
+/// A provider-7 challenge answered with a rejected assertion (server
+/// re-challenges on the resubmit) must surface as typed Auth — never as a
+/// second TwoFactorRequired, which the CLI hard-refuses.
+#[cfg(feature = "webauthn")]
+#[tokio::test]
+async fn webauthn_rejected_assertion_is_auth_error() {
+    let fx = fixture();
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/identity/accounts/prelogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "kdf": 0,
+            "kdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+
+    // Every token call challenges — the resubmit's assertion is "wrong".
+    Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": "invalid_grant",
+            "error_description": "Two factor required.",
+            "TwoFactorProviders": ["7"],
+            "TwoFactorProviders2": {
+                "7": {
+                    "challenge": "Rk9PQmFy",
+                    "rpId": "localhost",
+                    "allowCredentials": [{"id": "Y3JlZC1pZA", "type": "public-key"}],
+                    "timeout": 60000,
+                    "userVerification": "discouraged"
+                }
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = VaultwardenProvider::new(&server.uri())
+        .unwrap()
+        .with_assertion_hook(|_| Ok(cryptile_core::SecretString::from("ASSERTION_BLOB")));
+
+    let err = provider
+        .login(LoginParams {
+            account: fx["email"].as_str().unwrap().into(),
+            secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            second_factor: Some(SecondFactor {
+                provider_tag: "webauthn".into(),
+                code: SecretString::new("".into()),
+            }),
+        })
+        .await
+        .expect_err("rejected assertion must fail");
+    assert!(
+        matches!(err, ProviderError::Auth(_)),
+        "expected typed Auth error, got: {err:?}"
+    );
+}
