@@ -221,7 +221,7 @@ fn kdf_from_json(v: &serde_json::Value) -> KdfParams {
     match kind {
         Some(1) => KdfParams::argon2id(
             iters.unwrap_or(3),
-            g("kdfMemory").or_else(|| g("KdfMemory")).unwrap_or(64),
+            g("kdfMemory").or_else(|| g("KdfMemory")).unwrap_or(64) * 1024, // MiB -> KiB
             g("kdfParallelism")
                 .or_else(|| g("KdfParallelism"))
                 .unwrap_or(4),
