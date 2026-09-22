@@ -14,5 +14,7 @@ pub mod cache;
 pub mod crypto;
 pub mod mapping;
 pub mod provider;
+#[cfg(feature = "webauthn")]
+pub mod webauthn;
 
 pub use provider::VaultwardenProvider;

@@ -150,7 +150,14 @@ fn resolve_second_factor(
     code_flag: Option<String>,
     code_env: Option<&str>,
 ) -> Result<cryptile_core::provider::SecondFactor, String> {
-    let answerable = |tag: &str| tag == "totp" || tag == "email";
+    let answerable = |tag: &str| match tag {
+        "totp" | "email" => true,
+        // Hardware keys need no code source; the CTAP2 ceremony in the
+        // provider is the answer. Without the compile-time feature the tag
+        // is unanswerable and gets skipped (and named in the failure hint).
+        "webauthn" => cfg!(feature = "webauthn"),
+        _ => false,
+    };
     let pick = || -> Result<String, String> {
         if let Some(p) = provider_pref {
             if !offered.iter().any(|t| t == p) {
@@ -158,6 +165,13 @@ fn resolve_second_factor(
                     "server did not offer two-factor provider '{p}' (offered: {})",
                     offered.join(", ")
                 ));
+            }
+            if p == "webauthn" && !cfg!(feature = "webauthn") {
+                return Err(
+                    "this build lacks security-key (webauthn) support; rebuild with \
+                     --features webauthn"
+                        .into(),
+                );
             }
             return Ok(p.to_string());
         }
@@ -174,6 +188,16 @@ fn resolve_second_factor(
             })
     };
     let provider_tag = pick()?;
+    // WebAuthn carries no operator-supplied code: the provider runs the
+    // device ceremony against the live challenge. The empty secret is a
+    // placeholder the provider replaces with the assertion blob.
+    #[cfg(feature = "webauthn")]
+    if provider_tag == "webauthn" {
+        return Ok(cryptile_core::provider::SecondFactor {
+            provider_tag,
+            code: SecStr::from(String::new()),
+        });
+    }
     let code: SecStr = if let Some(c) = code_flag {
         SecStr::from(c)
     } else if let Some(var) = code_env {

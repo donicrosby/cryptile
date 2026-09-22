@@ -127,6 +127,49 @@ agent (refresh-token grant survives it).
   then re-run `cryptile login` (fresh seal) with the new passphrase and update
   `CRYPTILE_PASSPHRASE` in the agent `.env`.
 
+## Two-factor logins
+
+`login` handles servers that require a second factor. The server decides what
+is required — cryptile does not guess. Both stage types are supported where
+your build supports them:
+
+**Authenticator (TOTP).** Export the code through the environment, never as an
+argv flag:
+
+```sh
+read -rs CRYPTILE_TOTP_CODE   # or any TOTP source you trust
+cryptile login --server https://vw.internal --account you@corp.com \
+    --passphrase-env CRYPTILE_PASSPHRASE \
+    --master-password-env CRYPTILE_MASTER_PASSWORD \
+    --2fa-env CRYPTILE_TOTP_CODE
+```
+
+If the server answers a plain login with a two-factor challenge, cryptile
+exits `3` (the auth-error code), prints the required stage type(s), and
+names the missing flag — so scripts and agents can react instead of hanging. Supplying the code completes
+the login; the response's `TwoFactorToken` is reused automatically for
+subsequent `get`/`list`/`export` calls in that session, and one automatic
+resubmit handles servers that require re-presenting the token on the very
+next request.
+
+**FIDO2 / WebAuthn (hardware keys).** Available only when cryptile was built
+with the `webauthn` cargo feature (off by default; usb + nfc transports). The
+feature needs `pkg-config` and `libudev` headers to build (`apt install
+pkg-config libudev-dev` on Debian/Ubuntu). A challenge of type `webauthn`
+with the feature built in runs a CTAP2 assertion against your plugged-in
+key — touch it when it blinks:
+
+```sh
+cryptile login --server https://vw.internal --account you@corp.com \
+    --passphrase-env CRYPTILE_PASSPHRASE \
+    --master-password-env CRYPTILE_MASTER_PASSWORD \
+    --2fa-provider webauthn
+```
+
+Without the feature, the same challenge fails with a remediation hint naming
+the feature. Soft tokens are deliberately not supported: no browser pops up,
+no phone app is consulted.
+
 ## License
 
 Apache-2.0. No Bitwarden code, no `bitwarden-sdk` (GPLv3) — crypto implemented

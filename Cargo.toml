@@ -37,3 +37,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rpassword = "7"
 wiremock = "0.6"
+# CTAP2 client (USB+NFC hardware keys). MPL-2.0, pre-1.0 -> exact pin per
+# dependency policy; see deny.toml rationale. Off by default (webauthn feature).
+webauthn-authenticator-rs = { version = "=0.5.5", features = ["usb", "nfc", "ui-cli"] }

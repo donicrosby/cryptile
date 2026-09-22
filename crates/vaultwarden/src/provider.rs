@@ -277,17 +277,30 @@ impl Provider for VaultwardenProvider {
     async fn login(&self, params: LoginParams) -> Result<Session, ProviderError> {
         let email = params.account.clone();
         let password = params.secret;
-        let second = params.second_factor.as_ref().map(|sf| {
-            tag_to_wire_id(&sf.provider_tag)
-                .map(|id| (id, sf.code.expose_secret().to_string()))
-                .ok_or_else(|| {
-                    ProviderError::Server(format!(
-                        "unsupported two-factor provider tag: {}",
-                        sf.provider_tag
-                    ))
-                })
-        });
-        let second = second.transpose()?;
+        let second = params
+            .second_factor
+            .as_ref()
+            .map(|sf| {
+                tag_to_wire_id(&sf.provider_tag)
+                    .map(|id| (id, sf.code.expose_secret().to_string()))
+                    .ok_or_else(|| {
+                        ProviderError::Server(format!(
+                            "unsupported two-factor provider tag: {}",
+                            sf.provider_tag
+                        ))
+                    })
+            })
+            .transpose()?;
+
+        #[cfg(feature = "webauthn")]
+        let second = match second {
+            // WebAuthn (wire 7) has no operator-supplied code: the answer is
+            // produced in `answer_two_factor` from the live challenge, so
+            // the first grant always goes out plain.
+            Some((7u8, _)) => None,
+            other => other,
+        };
+
         let pre_raw: serde_json::Value = self.client.prelogin(&email).await.map_err(map_api)?.0;
         let kdf = kdf_from_json(&pre_raw);
         let master_key =
@@ -300,8 +313,30 @@ impl Provider for VaultwardenProvider {
                 hash.as_str(),
                 second.as_ref().map(|(p, t)| (*p, t.as_str())),
             )
-            .await
-            .map_err(map_api)?;
+            .await;
+        // One answer, one resubmit: a 2FA challenge here is either answered
+        // (device ceremony or code) and resubmitted exactly once, or fails
+        // typed. No retry loops.
+        let token = match token {
+            Err(ApiError::TwoFactorChallenge(body)) => {
+                let answered =
+                    self.answer_two_factor(&body, second.as_ref().map(|(p, t)| (*p, t.as_str())))?;
+                match answered {
+                    Some((provider, token_value)) => self
+                        .client
+                        .token_password(
+                            &email,
+                            hash.as_str(),
+                            Some((provider, token_value.as_str())),
+                        )
+                        .await
+                        .map_err(map_api)?,
+                    None => return Err(map_api(ApiError::TwoFactorChallenge(body))),
+                }
+            }
+            Err(e) => return Err(map_api(e)),
+            Ok(t) => t,
+        };
         // Unwrap now: wrong password must fail at login, not first sync.
         let user_key = unwrap_user_key(&token.key, &master_key)?;
         let user_key_b64 = base64_encode(user_key_bytes(&user_key));
@@ -514,6 +549,45 @@ impl Provider for VaultwardenProvider {
 }
 
 impl VaultwardenProvider {
+    /// Choose the second-factor answer for the wire and run it. Code-based
+    /// factors (totp/email) pass through; webauthn (wire 7) triggers the
+    /// CTAP2 device ceremony: decode the challenge, drive the hardware key,
+    /// assemble the web-vault connector token JSON, resubmit exactly once.
+    #[allow(unused_variables)] // challenge body unused with the feature off
+    fn answer_two_factor(
+        &self,
+        challenge_body: &str,
+        second: Option<(u8, &str)>,
+    ) -> Result<Option<(u8, String)>, ProviderError> {
+        match second {
+            // Code factors already carry their answer.
+            answer @ (Some((0, _)) | Some((1, _))) => Ok(answer.map(|(p, t)| (p, t.to_string()))),
+            // WebAuthn selected.
+            Some((7, _)) => {
+                #[cfg(feature = "webauthn")]
+                {
+                    let ch = crate::webauthn::challenge_from_body(challenge_body)
+                        .map_err(|e| ProviderError::Auth(format!("{e}")))?;
+                    let ch = std::clone::Clone::clone(&ch);
+                    let token = std::thread::spawn(move || crate::webauthn::perform_assertion(&ch))
+                        .join()
+                        .map_err(|_| ProviderError::Server("webauthn thread panicked".into()))?
+                        .map_err(|e| ProviderError::Auth(format!("{e}")))?;
+                    Ok(Some((7, token.expose_secret().to_string())))
+                }
+                #[cfg(not(feature = "webauthn"))]
+                Err(ProviderError::Auth(
+                    "server demanded webauthn (security-key) two-factor but this build \
+                     lacks hardware-key support; rebuild with --features webauthn"
+                        .into(),
+                ))
+            }
+            Some((n, _)) => Err(ProviderError::Auth(format!(
+                "no answerable code for two-factor provider {n}"
+            ))),
+            None => Ok(None),
+        }
+    }
     /// Warm-path resolution. Ok(None) = fall through to full sync.
     #[tracing::instrument(skip(self, sess, cache), fields(op = "warm_lookup"))]
     async fn get_secret_warm(

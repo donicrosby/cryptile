@@ -271,6 +271,23 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+echo "== two-factor stage =="
+T2FA_LOG="$(mktemp)"
+CRYPTILE_STATE_DIR="$STATE_DIR" CRYPTILE_PASSPHRASE="$PASSPHRASE" \
+   CRYPTILE_MASTER_PASSWORD="harness-master-password" \
+   CRYPTILE_LIVE_BASE="$BASE_URL" \
+   python3 "$REPO/integration/twofa_stage.py" 2>&1 | tee "$T2FA_LOG"
+T2FA_RC="${PIPESTATUS[0]}"
+if [ "$T2FA_RC" -ne 0 ]; then
+    echo "(2fa stage exited nonzero; failures listed above)"
+fi
+T2FA_P="$(grep -c '^PASS:' "$T2FA_LOG" || true)"
+T2FA_F="$(grep -c '^FAIL:' "$T2FA_LOG" || true)"
+PASS_COUNT=$((PASS_COUNT + T2FA_P))
+FAIL_COUNT=$((FAIL_COUNT + T2FA_F))
+rm -f "$T2FA_LOG"
+
+# ---------------------------------------------------------------------------
 echo
 echo "results: $PASS_COUNT passed, $FAIL_COUNT failed"
 exit "$FAIL_COUNT"

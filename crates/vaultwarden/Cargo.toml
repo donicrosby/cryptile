@@ -28,6 +28,15 @@ serde_json.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
+webauthn-authenticator-rs = { workspace = true, optional = true }
+secrecy = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+default = []
+# Hardware security-key second factor (provider 7). USB + NFC only, no soft
+# tokens by policy: the point is a hardware root of trust.
+webauthn = ["dep:webauthn-authenticator-rs", "dep:secrecy", "dep:tokio"]
 
 [dev-dependencies]
 wiremock.workspace = true

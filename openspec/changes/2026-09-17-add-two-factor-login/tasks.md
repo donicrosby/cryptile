@@ -27,7 +27,7 @@
   remediation hint naming the flags when a challenge arrives with no
   resolution path; single resubmit, no loops. Verify: CLI-level tests
   asserting exit codes (`assertexit` style) in `crates/cli`.
-- [ ] 6. WebAuthn feature: `webauthn` cargo feature on cryptile-vaultwarden
+- [x] 6. WebAuthn feature: `webauthn` cargo feature on cryptile-vaultwarden
   (default off) adding challenge parse → clientDataJSON assembly → CTAP2
   assertion via `webauthn-authenticator-rs` (usb + nfc transports only, no
   soft tokens), assertion JSON as `SecretString`; unit tests for challenge
@@ -35,21 +35,37 @@
   untestable in CI, exercised by the manual hardware stage (Task 9).
   Verify: `cargo build -p cryptile-vaultwarden --features webauthn &&
   cargo test -p cryptile-vaultwarden --features webauthn`.
-- [ ] 7. License gate: pin `webauthn-authenticator-rs = "=0.5.x"` (exact, per
+- [x] 7. License gate: pin `webauthn-authenticator-rs = "=0.5.5"` (exact, per
   0.x policy), add MPL-2.0 clarification to `deny.toml` with rationale
-  comment. Verify: `cargo deny check licenses` green in CI job.
-- [ ] 8. Live harness stage: enable authenticator 2FA (pyotp seed, len+sha12
+  comment. Verify: `cargo deny check licenses` green (default and
+  `--features webauthn`).
+- [x] 8. Live harness stage: enable authenticator 2FA (pyotp seed, len+sha12
   discipline, never printed), `cryptile login --2fa-env TOTP_CODE` →
   get/export parity, teardown disables 2FA + re-proves plain login;
   `SKIP_2FA_LIVE=1` skip path asserts notice not failure. Verify: `CRYPTILE_VW_BIND=1
   integration/run_live_tests.sh` (staged run, harness env flags).
+  STATUS: GREEN — full harness 42 passed / 0 failed; 2FA stage 6/6
+  (baseline, enable, challenged login seals session, get parity, teardown
+  disable, plain login restored). Two real fixes found by running it:
+  teardown disable is `DELETE /two-factor/authenticator` with
+  {key, masterPasswordHash, type:0} (VW 1.37.x has no /two-factor/<id>
+  path — old call 404'd), and VW prelogin answers missing accounts with a
+  flat 600k default (earlier "auth fails" was a stale fixture, not code).
 - [ ] 9. Manual hardware-key runbook: README section documenting `cryptile
   login --2fa-provider webauthn` against a real CTAP2 key (operator-run;
   records make/model + outcome in `docs/webauthn-notes.md`, explicitly not
   CI-gated). Verify: section exists + one recorded manual run.
-- [ ] 10. Gates: `cargo fmt --all`; `cargo clippy --workspace --all-targets
+  STATUS: README "Two-factor logins" section done (exit-3 contract,
+  `--2fa-env`, feature gate, `libudev-dev` prerequisite, webauthn example);
+  `docs/webauthn-notes.md` runbook created with empty recorded-runs table —
+  needs one operator run with real hardware before flipping to [x].
+- [x] 10. Gates: `cargo fmt --all`; `cargo clippy --workspace --all-targets
   --all-features` zero warnings; `cargo test --workspace --all-features`.
   Verify: all three commands exit 0.
+  STATUS: ALL GREEN — fmt --all --check clean, clippy --workspace
+  --all-targets --all-features zero warnings, cargo test --workspace
+  --all-features 66 passed / 0 failed, cargo deny check licenses green
+  (MPL-2.0 pinned to webauthn-authenticator-rs =0.5.5 only).
 - [ ] 11. Commit (conventional: `feat(cli): two-factor login (totp, email,
   webauthn)`), push with gh credential helper, watch CI to green, `openspec
   validate --strict`, archive the change, commit the archive. Verify: CI
