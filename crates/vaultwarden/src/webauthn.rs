@@ -40,6 +40,43 @@ mod shared {
         pub rp_id: String,
         /// Allowed credential ids (base64url strings as served).
         pub allow_credential_ids: Vec<String>,
+        /// Server-requested user-verification posture
+        /// (`userVerification` on the provider-7 entry; absent →
+        /// [`UvPosture::Discouraged`]). Consumed by the fidoh path; the
+        /// legacy path keeps its hardcoded posture until stage 2.
+        pub uv: UvPosture,
+    }
+
+    /// Server-requested user-verification posture from the provider-7
+    /// challenge entry (add-fidoh-uv-passthrough). The wire value is one
+    /// of `discouraged` | `preferred` | `required` (WebAuthn L3
+    /// §5.4.6); `required` and `preferred` both mean "ask the key to
+    /// verify the user" at the CTAP2 getAssertion layer.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum UvPosture {
+        /// Omitted or `"discouraged"`: do not ask the key to verify.
+        Discouraged,
+        /// `"preferred"` or `"required"`: ask the key to verify. fidoh
+        /// degrades gracefully to the discouraged wire shape when the
+        /// plugged key advertises no `uv` capability (its getInfo-probe
+        /// contract, reported in the ceremony outcome); the full PIN
+        /// flow arrives with fidoh beta.1's clientPIN work, not here.
+        Preferred,
+    }
+
+    impl UvPosture {
+        /// Wire spelling → posture. Case-insensitive: the value is a
+        /// DOM string the server echoes, casing not contractual.
+        /// Unknown spellings return None so the challenge decode can
+        /// fail typed instead of inventing a policy the server did not
+        /// ask for.
+        pub fn from_wire(spelling: &str) -> Option<Self> {
+            match spelling.to_ascii_lowercase().as_str() {
+                "discouraged" => Some(Self::Discouraged),
+                "preferred" | "required" => Some(Self::Preferred),
+                _ => None,
+            }
+        }
     }
 
     /// Errors from challenge decoding and the device ceremony. The legacy
@@ -107,10 +144,30 @@ mod shared {
                 "provider-7 allowCredentials is empty; no credential can answer".into(),
             ));
         }
+        // Server-requested user-verification posture (add-fidoh-uv-
+        // passthrough): absent → discouraged; case-insensitive per the
+        // wire spelling; unknown spellings fail typed. Only the fidoh
+        // path consumes this today — the legacy path keeps its hardcoded
+        // `discouraged` until stage 2 flips the default.
+        let uv = match entry.get("userVerification").map(serde_json::Value::as_str) {
+            Some(Some(spelling)) => UvPosture::from_wire(spelling).ok_or_else(|| {
+                WebauthnError::Challenge(format!(
+                    "provider-7 userVerification '{spelling}' is not one of \
+                     discouraged|preferred|required"
+                ))
+            })?,
+            Some(None) => {
+                return Err(WebauthnError::Challenge(
+                    "provider-7 userVerification is not a string".into(),
+                ))
+            }
+            None => UvPosture::Discouraged,
+        };
         Ok(WebauthnChallenge {
             challenge_b64,
             rp_id,
             allow_credential_ids,
+            uv,
         })
     }
 
@@ -175,7 +232,7 @@ use shared::{b64url_decode, fido2_response_json};
 #[cfg(any(feature = "webauthn", feature = "fidoh"))]
 pub(crate) use shared::{challenge_from_body, origin_for_rp_id};
 #[cfg(any(feature = "webauthn", feature = "fidoh"))]
-pub use shared::{WebauthnChallenge, WebauthnError};
+pub use shared::{UvPosture, WebauthnChallenge, WebauthnError};
 
 // ------------------------------------------------------------------------
 // The fidoh-backed ceremony (feature = "fidoh", stage 1 of
@@ -203,7 +260,8 @@ mod fidoh_backend {
     use sha2::{Digest, Sha256};
 
     use super::shared::{
-        b64url_decode, b64url_nopad, fido2_response_json, WebauthnChallenge, WebauthnError,
+        b64url_decode, b64url_nopad, fido2_response_json, UvPosture, WebauthnChallenge,
+        WebauthnError,
     };
 
     /// The ceremony budget handed to fidoh (its single ceremony Deadline:
@@ -411,17 +469,28 @@ mod fidoh_backend {
     }
 
     /// The §6.2 exchange. `allow_credentials: None` would mean resident-key
-    /// discovery; the server always pins the allow-list.
+    /// discovery; the server always pins the allow-list. The
+    /// user-verification posture is the server's request
+    /// (add-fidoh-uv-passthrough): discouraged → omit `options.uv`;
+    /// preferred/required → `UvPolicy::Preferred`, which fidoh degrades
+    /// to the discouraged wire shape when the plugged key advertises no
+    /// `uv` capability (its getInfo-probe contract, reported in the
+    /// ceremony outcome). No PIN acquisition here — that is fidoh
+    /// beta.1's clientPIN work.
     fn exchange(
         rp_id: &str,
         client_data_hash: Vec<u8>,
         allow: Vec<PublicKeyCredentialDescriptor>,
+        uv: UvPosture,
     ) -> GetAssertionExchange {
         GetAssertionExchange {
             rp_id: rp_id.to_string(),
             client_data_hash,
             allow_credentials: Some(allow),
-            user_verification: UvPolicy::Discouraged,
+            user_verification: match uv {
+                UvPosture::Discouraged => UvPolicy::Discouraged,
+                UvPosture::Preferred => UvPolicy::Preferred,
+            },
             pin_uv_auth: None,
             drain: None,
         }
@@ -536,7 +605,7 @@ mod fidoh_backend {
         let (challenge_bytes, allow) = assertion_request(ch)?;
         let (client_data_hash, client_data_json_bytes) =
             client_data_json(&origin, &b64url_nopad(&challenge_bytes));
-        let xch = exchange(&ch.rp_id, client_data_hash, allow);
+        let xch = exchange(&ch.rp_id, client_data_hash, allow, ch.uv);
 
         // One budget for the whole ceremony (fidoh's single-Deadline model):
         // discovery, selection, connect, the probe, and the §6.2 exchange
@@ -847,6 +916,71 @@ mod tests {
         assert_eq!(b64url_decode("Y3JlZC1pZA==").unwrap(), b"cred-id");
         assert_eq!(b64url_decode("Y3JlZC1pZA").unwrap(), b"cred-id");
         assert_eq!(b64url_decode("Rk9PQmFy").unwrap(), b"FOOBar");
+    }
+
+    // add-fidoh-uv-passthrough: the provider-7 entry's userVerification
+    // rides on the decoded challenge (consumed by the fidoh exchange).
+
+    #[test]
+    fn challenge_uv_preferred_and_required_decode_to_preferred() {
+        for spelling in ["preferred", "required", "PREFERRED", "Required"] {
+            let body = format!(
+                r#"{{"TwoFactorProviders2":{{"7":{{"challenge":"Rk9PQmFy","rpId":"localhost","allowCredentials":[{{"id":"Y3JlZC1pZA"}}],"userVerification":"{spelling}"}}}}}}"#
+            );
+            let ch = challenge_from_body(&body).expect("decodes");
+            assert_eq!(ch.uv, UvPosture::Preferred, "spelling {spelling:?}");
+        }
+    }
+
+    #[test]
+    fn challenge_uv_absent_and_discouraged_decode_to_discouraged() {
+        // Absent: the pre-change default.
+        let absent = challenge_from_body(
+            r#"{"TwoFactorProviders2":{"7":{"challenge":"Rk9PQmFy","rpId":"localhost","allowCredentials":[{"id":"Y3JlZC1pZA"}]}}}"#,
+        )
+        .expect("decodes");
+        assert_eq!(absent.uv, UvPosture::Discouraged);
+        // Explicit discouraged + the live-capture shape (CHALLENGE_BODY).
+        let explicit = challenge_from_body(
+            r#"{"TwoFactorProviders2":{"7":{"challenge":"Rk9PQmFy","rpId":"localhost","allowCredentials":[{"id":"Y3JlZC1pZA"}],"userVerification":"discouraged"}}}"#,
+        )
+        .expect("decodes");
+        assert_eq!(explicit.uv, UvPosture::Discouraged);
+        let captured = challenge_from_body(CHALLENGE_BODY).expect("decodes");
+        assert_eq!(captured.uv, UvPosture::Discouraged);
+    }
+
+    #[test]
+    fn challenge_uv_unknown_or_non_string_fails_typed() {
+        let unknown = r#"{"TwoFactorProviders2":{"7":{"challenge":"a","rpId":"x","allowCredentials":[{"id":"a"}],"userVerification":"maybe"}}}"#;
+        assert!(matches!(
+            challenge_from_body(unknown),
+            Err(WebauthnError::Challenge(_))
+        ));
+        let non_string = r#"{"TwoFactorProviders2":{"7":{"challenge":"a","rpId":"x","allowCredentials":[{"id":"a"}],"userVerification":1}}}"#;
+        assert!(matches!(
+            challenge_from_body(non_string),
+            Err(WebauthnError::Challenge(_))
+        ));
+    }
+
+    #[test]
+    fn uv_posture_wire_mapping() {
+        assert_eq!(
+            UvPosture::from_wire("discouraged"),
+            Some(UvPosture::Discouraged)
+        );
+        assert_eq!(
+            UvPosture::from_wire("preferred"),
+            Some(UvPosture::Preferred)
+        );
+        assert_eq!(UvPosture::from_wire("required"), Some(UvPosture::Preferred));
+        assert_eq!(
+            UvPosture::from_wire("Discouraged"),
+            Some(UvPosture::Discouraged)
+        );
+        assert_eq!(UvPosture::from_wire(""), None);
+        assert_eq!(UvPosture::from_wire("always"), None);
     }
 }
 
