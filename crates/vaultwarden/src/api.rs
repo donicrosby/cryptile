@@ -4,7 +4,7 @@
 //! Transport only — no crypto here, no secrets in logs.
 
 use reqwest::header::{HeaderMap, HeaderValue};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use thiserror::Error;
 
 /// Client identification sent on EVERY request. Servers gate sync payload
@@ -110,6 +110,44 @@ pub struct TokenResponse {
 
 fn default_expires_in() -> u64 {
     3600
+}
+
+/// Deserialize a sequence member that servers also emit as JSON `null`
+/// when empty: null decodes to `Default::default()` exactly like an
+/// absent member. Real Vaultwarden emits present-as-null for empty
+/// collections (e.g. a cipher with no custom `fields`), which a bare
+/// `Vec<T>` with `#[serde(default)]` rejects — that default covers
+/// ABSENT members only, not PRESENT-AS-NULL ones, and one such member
+/// failed the whole sync parse (`invalid type: null, expected a
+/// sequence`), taking down `list`/`get` against a healthy server.
+fn null_to_default<'de, D, T>(de: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    let v: Option<T> = Option::deserialize(de)?;
+    Ok(v.unwrap_or_default())
+}
+
+/// `/api/collections` (and any other list endpoint) envelope. `data` is
+/// `Option<Vec<T>>` so a server-emitted `null` decodes natively to
+/// `None` (no `deserialize_with` gymnastics); [`List::into_data`]
+/// collapses None/absent to the empty vec at the call site. The
+/// explicit `bound` stops serde from inferring a `T: Default`
+/// requirement from `#[serde(default)]` — `Option<Vec<T>>` defaults
+/// without `T: Default`, and the envelope must not force that bound on
+/// every element type.
+#[derive(Deserialize)]
+#[serde(bound = "T: serde::de::Deserialize<'de>")]
+struct List<T> {
+    #[serde(default)]
+    data: Option<Vec<T>>,
+}
+
+impl<T> List<T> {
+    fn into_data(self) -> Vec<T> {
+        self.data.unwrap_or_default()
+    }
 }
 
 /// The identity + API surface, parameterized by base URLs.
@@ -294,12 +332,8 @@ impl Client {
             .send()
             .await
             .map_err(|e| ApiError::Transport(e.to_string()))?;
-        #[derive(Deserialize)]
-        struct List<T> {
-            data: Vec<T>,
-        }
-        let List { data } = Self::parse(resp, "collections").await?;
-        Ok(data)
+        let list: List<ApiCollection> = Self::parse(resp, "collections").await?;
+        Ok(list.into_data())
     }
 }
 
@@ -340,7 +374,7 @@ fn uuid_v4(b: &[u8; 16]) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct SyncResponse {
     pub profile: Profile,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     pub ciphers: Vec<Cipher>,
 }
 
@@ -351,7 +385,7 @@ pub struct Profile {
     pub email: String,
     pub key: String,
     pub private_key: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     pub organizations: Vec<Org>,
 }
 
@@ -385,7 +419,7 @@ pub struct Cipher {
     #[serde(rename = "sshKey", default)]
     pub ssh_key: Option<SshKeyData>,
     pub notes: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     pub fields: Vec<Field>,
 }
 
@@ -396,7 +430,7 @@ pub struct LoginData {
     pub password: Option<String>,
     pub totp: Option<String>,
     /// The API emits a `uris` array (singular `uri` is not a real shape).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     pub uris: Vec<LoginUri>,
 }
 
@@ -462,4 +496,116 @@ pub struct ApiCollection {
     pub id: String,
     pub organization_id: String,
     pub name: String,
+}
+
+#[cfg(test)]
+mod null_tolerance_tests {
+    use super::*;
+
+    // Live crash (owner run, 2026-09): real Vaultwarden 1.37.2 emits
+    // present-as-null for empty sequence members — `"fields": null` on a
+    // plain login cipher landed at "line 1 column 26325" of a real sync
+    // body and failed the whole parse. Fixture-style bodies pin each
+    // vulnerable member.
+
+    #[test]
+    fn sync_body_with_null_members_parses_fully() {
+        let body = r#"{
+            "profile": {
+                "id": "u1",
+                "email": "svc@x.test",
+                "key": "2.key|enc|mac",
+                "privateKey": "0.abc",
+                "organizations": null
+            },
+            "ciphers": null,
+            "folders": null,
+            "object": "sync"
+        }"#;
+        let sync: SyncResponse =
+            serde_json::from_str(body).expect("null members must not fail the sync parse");
+        assert!(sync.ciphers.is_empty());
+        assert!(sync.profile.organizations.is_empty());
+        assert_eq!(sync.profile.id, "u1");
+    }
+
+    #[test]
+    fn cipher_with_null_fields_and_login_uris_parses_fully() {
+        let body = r#"{
+            "id": "c1",
+            "name": "2.name|enc|mac",
+            "organizationId": null,
+            "collectionIds": null,
+            "key": null,
+            "login": {
+                "username": null,
+                "password": "2.pass|enc|mac",
+                "totp": null,
+                "uris": null
+            },
+            "card": null,
+            "identity": null,
+            "sshKey": null,
+            "notes": null,
+            "fields": null
+        }"#;
+        let c: Cipher =
+            serde_json::from_str(body).expect("null fields/uris must not fail cipher parse");
+        assert!(c.fields.is_empty());
+        let login = c.login.expect("login decodes");
+        assert!(login.uris.is_empty());
+        assert_eq!(login.password.as_deref(), Some("2.pass|enc|mac"));
+    }
+
+    #[tokio::test]
+    async fn collections_envelope_with_null_data_parses_empty() {
+        // Through the real client path: the /api/collections envelope is
+        // generic (List<T>), so the null tolerance is proven end-to-end
+        // rather than against the private type (whose derived impl
+        // carries serde's conservative Default bound).
+        use wiremock::matchers::{method, path};
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(method("GET"))
+            .and(path("/api/collections"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data": null, "object": "list"})),
+            )
+            .mount(&server)
+            .await;
+        let client = Client::from_base(&server.uri()).expect("client builds");
+        let out = client.collections("tok").await.expect("null data parses");
+        assert!(out.is_empty());
+        let list: List<ApiCollection> = serde_json::from_str(r#"{"data": null, "object": "list"}"#)
+            .expect("envelope direct: null data is None");
+        assert!(list.into_data().is_empty());
+        let list: List<ApiCollection> = serde_json::from_str(
+            r#"{"data": [{"id": "k1", "organizationId": "o1", "name": "2.nm"}]}"#,
+        )
+        .expect("populated envelope unchanged");
+        let data = list.into_data();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0].id, "k1");
+    }
+
+    #[test]
+    fn absent_members_keep_the_empty_default() {
+        let body = r#"{
+            "profile": {
+                "id": "u1",
+                "email": "svc@x.test",
+                "key": "2.key|enc|mac",
+                "privateKey": "0.abc"
+            }
+        }"#;
+        let sync: SyncResponse =
+            serde_json::from_str(body).expect("absent members behave exactly as before");
+        assert!(sync.ciphers.is_empty());
+        assert!(sync.profile.organizations.is_empty());
+        let c: Cipher =
+            serde_json::from_str(r#"{"id": "c1", "name": "2.name|enc|mac", "login": {}}"#)
+                .expect("cipher without fields/uris members unchanged");
+        assert!(c.fields.is_empty());
+        assert!(c.login.expect("login").uris.is_empty());
+    }
 }

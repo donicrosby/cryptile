@@ -18,6 +18,14 @@ fn fixture() -> serde_json::Value {
     serde_json::from_str(include_str!("wiremock_fixture.json")).unwrap()
 }
 
+/// Per-test temp root: pid + explicit caller tag. Every test in this
+/// binary runs in ONE process, so the tag is what keeps their
+/// `cache/cipher-index` files from colliding (see the comment in
+/// [`env`]).
+fn temp_dir_for(tag: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("vw-cache-e2e-{}-{tag}", std::process::id()))
+}
+
 struct Env {
     server: MockServer,
     provider: VaultwardenProvider,
@@ -26,7 +34,7 @@ struct Env {
     dir: std::path::PathBuf,
 }
 
-async fn env(cache: bool) -> Env {
+async fn env(cache: bool, tag: &str) -> Env {
     let fx = fixture();
     let server = MockServer::start().await;
 
@@ -115,7 +123,14 @@ async fn env(cache: bool) -> Env {
         .await;
 
     let mut provider = VaultwardenProvider::new(&server.uri()).unwrap();
-    let dir = std::env::temp_dir().join(format!("vw-cache-e2e-{}", std::process::id()));
+    // Per-TEST dir: pid + a caller-supplied test tag. A pid-only key
+    // shares one `cache/cipher-index` file across every test in this
+    // binary (same process), and `tampered_cache_self_heals` writes a
+    // corrupt line into it — if `warm_second_get_skips_sync` reads
+    // between that write and its own rewrite, its warm get MAC-fails,
+    // takes the cold path, and issues a second /sync (the
+    // deterministic-in-CI, locally-flaky red on run 36177926127).
+    let dir = temp_dir_for(tag);
     if cache {
         provider = provider.with_cache_path(dir.join("cache").join("cipher-index"));
     }
@@ -139,7 +154,7 @@ async fn env(cache: bool) -> Env {
 
 #[tokio::test]
 async fn warm_second_get_skips_sync() {
-    let e = env(true).await;
+    let e = env(true, "warm_second_get_skips_sync").await;
     let r = Ref::parse("vw://shared/smtp#password").unwrap();
 
     // Cold: full sync + collections, cache written.
@@ -164,7 +179,7 @@ async fn warm_second_get_skips_sync() {
 
 #[tokio::test]
 async fn no_cache_path_means_sync_every_time() {
-    let e = env(false).await;
+    let e = env(false, "no_cache_path_means_sync_every_time").await;
     let r = Ref::parse("vw://shared/smtp#password").unwrap();
     e.provider.get_secret(&e.session, &r).await.unwrap();
     e.provider.get_secret(&e.session, &r).await.unwrap();
@@ -176,7 +191,7 @@ async fn no_cache_path_means_sync_every_time() {
 
 #[tokio::test]
 async fn tampered_cache_self_heals() {
-    let e = env(true).await;
+    let e = env(true, "tampered_cache_self_heals").await;
     let item = "smtp";
     let r = Ref::parse(&format!("vw://shared/{item}#password")).unwrap();
     e.provider.get_secret(&e.session, &r).await.unwrap(); // cold, writes cache
@@ -194,4 +209,29 @@ async fn tampered_cache_self_heals() {
     let syncs = reqs.iter().filter(|q| q.url.path() == "/api/sync").count();
     assert_eq!(syncs, 2, "corrupt cache must fall back to full sync");
     let _ = std::fs::remove_dir_all(&e.dir);
+}
+
+// Regression lock for run 36177926127: the product behavior was never
+// wrong — the tests used to share one pid-keyed cache file, so the
+// deliberate corruption written by `tampered_cache_self_heals` could
+// interleave with `warm_second_get_skips_sync`'s warm read and turn
+// its warm get into a full sync. Interleaving itself can't be pinned
+// deterministically; the isolation invariant can: the shared
+// dir-computation helper must give every test in this binary a
+// distinct root.
+#[test]
+fn cache_paths_are_unique_per_test() {
+    let names = [
+        "warm_second_get_skips_sync",
+        "no_cache_path_means_sync_every_time",
+        "tampered_cache_self_heals",
+        "cache_paths_are_unique_per_test",
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for name in names {
+        assert!(
+            seen.insert(temp_dir_for(name)),
+            "cache dir collision for {name}"
+        );
+    }
 }
