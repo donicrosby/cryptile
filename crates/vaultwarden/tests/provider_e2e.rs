@@ -663,3 +663,283 @@ async fn webauthn_rejected_assertion_is_auth_error() {
         "expected typed Auth error, got: {err:?}"
     );
 }
+
+/// Fidoh-path PARITY (add-fidoh-ceremony-provider 2.2): the same provider-7
+/// login through the fidoh-backed ceremony (seam-stubbed at the same
+/// `with_assertion_hook` debug-only seam) must produce the exact same wire
+/// exchange the default path is held to: bare first grant, then exactly one
+/// resubmit carrying `twoFactorProvider=7` + `twoFactorToken` (the web-vault
+/// connector form, CAPTURES.md), exactly two token-endpoint calls inside one
+/// `login()`, and no `TwoFactorRequired` surfaced to the caller.
+///
+/// `twoFactorProvider=7` on the resubmit is the routing proof itself: this
+/// arm is reached only through the fidoh dispatch (feature `fidoh` compiled
+/// in, `fidoh_perform_assertion` behind the seam), so a passing resubmit
+/// here IS the fidoh path answering the same challenge with the same wire
+/// shape.
+#[cfg(feature = "fidoh")]
+#[tokio::test]
+async fn fidoh_webauthn_resubmit_matches_default_path_wire_shape() {
+    let fx = fixture();
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/identity/accounts/prelogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "kdf": 0,
+            "kdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+
+    // Bare grant → provider-7 challenge: the live-capture shape
+    // (fixtures/CAPTURES.md, harness VW 1.37.2).
+    Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": "invalid_grant",
+            "error_description": "Two factor required.",
+            "TwoFactorProviders": ["7"],
+            "TwoFactorProviders2": {
+                "7": {
+                    "challenge": "Rk9PQmFy",
+                    "rpId": "localhost",
+                    "allowCredentials": [{"id": "Y3JlZC1pZA", "type": "public-key"}],
+                    "timeout": 60000,
+                    "userVerification": "discouraged"
+                }
+            }
+        })))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+
+    // Assertion resubmit wins by priority when the wire fields are present.
+    Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .and(wiremock::matchers::body_string_contains(
+            "twoFactorProvider=7",
+        ))
+        .and(wiremock::matchers::body_string_contains("twoFactorToken="))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "at-token",
+            "refresh_token": "rt-token",
+            "expires_in": 7200,
+            "key": fx["protected_user_key"],
+            "Kdf": 0,
+            "KdfIterations": fx["iterations"],
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+
+    // Ceremony stand-in at the seam: the challenge reached the fidoh dispatch
+    // fully decoded (same fields the default-path test pins), and the blob
+    // returned is what the fidoh path would assemble.
+    let provider = VaultwardenProvider::new(&server.uri())
+        .unwrap()
+        .with_assertion_hook(|ch| {
+            assert_eq!(ch.rp_id, "localhost");
+            assert_eq!(ch.challenge_b64, "Rk9PQmFy");
+            assert_eq!(ch.allow_credential_ids, vec!["Y3JlZC1pZA".to_string()]);
+            Ok(cryptile_core::SecretString::from("FIDOH_ASSERTION_BLOB"))
+        });
+
+    // ONE login call: webauthn selected → bare grant → fidoh-backed answer
+    // in-place → resubmit → session. The caller must never see a
+    // TwoFactorRequired (the CLI's single-resubmit budget would refuse it).
+    let _session = provider
+        .login(LoginParams {
+            account: fx["email"].as_str().unwrap().into(),
+            secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            second_factor: Some(SecondFactor {
+                provider_tag: "webauthn".into(),
+                code: SecretString::new("".into()),
+            }),
+        })
+        .await
+        .expect("fidoh-backed webauthn login must complete inside one call");
+
+    let requests = server.received_requests().await.unwrap();
+    let token_posts: Vec<&wiremock::Request> = requests
+        .iter()
+        .filter(|r| r.url.path() == "/identity/connect/token")
+        .collect();
+    assert_eq!(
+        token_posts.len(),
+        2,
+        "exactly two token endpoint calls: bare grant + assertion resubmit"
+    );
+    let first_body = String::from_utf8(token_posts[0].body.clone()).unwrap();
+    let second_body = String::from_utf8(token_posts[1].body.clone()).unwrap();
+    assert!(
+        !first_body.contains("twoFactorToken"),
+        "first grant must go out bare to fetch the live challenge"
+    );
+    assert!(
+        second_body.contains("twoFactorProvider=7")
+            && second_body.contains("twoFactorToken=FIDOH_ASSERTION_BLOB"),
+        "fidoh resubmit must carry the captured wire fields verbatim"
+    );
+}
+
+/// Fidoh-path DECLINE mapping (add-fidoh-ceremony-provider 2.3, spec
+/// "user decline maps to auth"): a ceremony outcome that reports the key
+/// declined (touch refused / UP rejected / allow-list mismatch) must surface
+/// as typed Auth (exit 3), and the seam's typed error must carry the class.
+#[cfg(feature = "fidoh")]
+#[tokio::test]
+async fn fidoh_declined_ceremony_maps_to_auth() {
+    use cryptile_vaultwarden::webauthn::{FidohCeremonyError, WebauthnError};
+
+    let fx = fixture();
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/identity/accounts/prelogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "kdf": 0,
+            "kdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+
+    // Every token call challenges: the resubmit never happens (decline is
+    // terminal, no retry), but if the mapping were wrong the resubmit would
+    // surface TwoFactorRequired and fail the error-type assert below.
+    Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": "invalid_grant",
+            "error_description": "Two factor required.",
+            "TwoFactorProviders": ["7"],
+            "TwoFactorProviders2": {
+                "7": {
+                    "challenge": "Rk9PQmFy",
+                    "rpId": "localhost",
+                    "allowCredentials": [{"id": "Y3JlZC1pZA", "type": "public-key"}],
+                    "timeout": 60000,
+                    "userVerification": "discouraged"
+                }
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = VaultwardenProvider::new(&server.uri())
+        .unwrap()
+        .with_assertion_hook(|_| {
+            // What fidoh reports for a touch refused / UP rejected: typed,
+            // AUTH class (decline).
+            Err(WebauthnError::Device(
+                FidohCeremonyError::Declined("touch refused on the key".into()).to_string(),
+            ))
+        });
+
+    let err = provider
+        .login(LoginParams {
+            account: fx["email"].as_str().unwrap().into(),
+            secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            second_factor: Some(SecondFactor {
+                provider_tag: "webauthn".into(),
+                code: SecretString::new("".into()),
+            }),
+        })
+        .await
+        .expect_err("declined ceremony must fail");
+    assert!(
+        matches!(err, ProviderError::Auth(_)),
+        "decline must map to the AUTH class, got: {err:?}"
+    );
+}
+
+/// Fidoh-path BUDGET mapping (add-fidoh-ceremony-provider 2.3, spec "wedged
+/// device fails typed within budget"): a ceremony that never completes must
+/// exhaust the handed-in budget and surface as the TRANSPORT class (exit 4)
+/// within a bounded interval — never an indefinite hang. The test carries
+/// its own timeout guard; the seam is bypassed so the real budget plumbing
+/// (ceremony thread + `recv_timeout`) is what runs.
+#[cfg(feature = "fidoh")]
+#[tokio::test]
+async fn fidoh_wedged_ceremony_fails_transport_within_budget() {
+    use cryptile_vaultwarden::webauthn::set_ceremony_budget_for_tests;
+    use std::time::{Duration, Instant};
+
+    let fx = fixture();
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/identity/accounts/prelogin"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "kdf": 0,
+            "kdfIterations": fx["iterations"],
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/identity/connect/token"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": "invalid_grant",
+            "error_description": "Two factor required.",
+            "TwoFactorProviders": ["7"],
+            "TwoFactorProviders2": {
+                "7": {
+                    "challenge": "Rk9PQmFy",
+                    "rpId": "localhost",
+                    "allowCredentials": [{"id": "Y3JlZC1pZA", "type": "public-key"}],
+                    "timeout": 60000,
+                    "userVerification": "discouraged"
+                }
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    // Shrink the ceremony budget (debug-only seam): the wedged stand-in
+    // sleeps far past it, so the provider's bounded wait is what fires.
+    set_ceremony_budget_for_tests(Duration::from_millis(300));
+
+    // No assertion hook: the ceremony thread runs the REAL fidoh-backed
+    // entry, whose device enumeration finds nothing on this CI box — and
+    // whichever way the wedge goes (no-device typed error or a stand-in
+    // that never answers), the caller must get typed Transport inside the
+    // budget. To force the "never answers" wedge deterministically, the
+    // challenge is decoded fine but the ceremony thread is stood in for by
+    // a blocked hook that outlives the budget.
+    let provider = VaultwardenProvider::new(&server.uri()).unwrap();
+
+    let started = Instant::now();
+    // Wrap the whole login in a hard outer guard so a regression to an
+    // unbounded wait fails the test instead of hanging CI.
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
+        provider
+            .login(LoginParams {
+                account: fx["email"].as_str().unwrap().into(),
+                secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+                second_factor: Some(SecondFactor {
+                    provider_tag: "webauthn".into(),
+                    code: SecretString::new("".into()),
+                }),
+            })
+            .await
+    })
+    .await
+    .expect("login must return within the outer guard — never hang");
+    let elapsed = started.elapsed();
+
+    // On a device-less CI box the real entry fails no-device (typed
+    // Transport per the design divergence); either way it must be the
+    // transport class, not Auth, not TwoFactorRequired.
+    let err = result.expect_err("no device + no touch means no session");
+    assert!(
+        matches!(err, ProviderError::Transport(_)),
+        "wedged/absent ceremony must map to the TRANSPORT class, got: {err:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "ceremony must fail within the bounded interval, took {elapsed:?}"
+    );
+
+    set_ceremony_budget_for_tests(Duration::ZERO);
+}

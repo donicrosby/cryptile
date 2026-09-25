@@ -14,7 +14,11 @@ pub mod cache;
 pub mod crypto;
 pub mod mapping;
 pub mod provider;
-#[cfg(feature = "webauthn")]
+// Gate widened by add-fidoh-ceremony-provider: the webauthn module now holds
+// the shared provider-7 decode/origin/wire-assembly plus both ceremony
+// backends (legacy `webauthn`, fidoh `fidoh`), so it exists under either
+// feature.
+#[cfg(any(feature = "webauthn", feature = "fidoh"))]
 pub mod webauthn;
 
 pub use provider::VaultwardenProvider;

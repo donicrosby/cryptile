@@ -18,9 +18,9 @@ use crate::mapping::{map_cipher, resolve_collection};
 
 /// Test seam for the CTAP2 ceremony (tests only — compiled out of release
 /// builds). The closure receives the decoded challenge and returns the
-/// `twoFactorToken` blob, exactly as `perform_assertion` would against a
-/// hardware key.
-#[cfg(all(feature = "webauthn", debug_assertions))]
+/// `twoFactorToken` blob, exactly as the ceremony (legacy or fidoh) would
+/// against a hardware key.
+#[cfg(all(any(feature = "webauthn", feature = "fidoh"), debug_assertions))]
 type AssertionHook = std::sync::Arc<
     dyn Fn(
             &crate::webauthn::WebauthnChallenge,
@@ -39,11 +39,11 @@ pub struct VaultwardenProvider {
     /// When set, this hook produces the `twoFactorToken` blob instead of
     /// touching a hardware key. CI has no USB device; the manual hardware
     /// runbook exercises the real path. Never user-facing.
-    #[cfg(all(feature = "webauthn", debug_assertions))]
+    #[cfg(all(any(feature = "webauthn", feature = "fidoh"), debug_assertions))]
     assertion_hook: Option<AssertionHook>,
 }
 
-#[cfg(not(all(feature = "webauthn", debug_assertions)))]
+#[cfg(not(all(any(feature = "webauthn", feature = "fidoh"), debug_assertions)))]
 impl std::fmt::Debug for VaultwardenProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VaultwardenProvider")
@@ -52,7 +52,7 @@ impl std::fmt::Debug for VaultwardenProvider {
     }
 }
 
-#[cfg(all(feature = "webauthn", debug_assertions))]
+#[cfg(all(any(feature = "webauthn", feature = "fidoh"), debug_assertions))]
 impl std::fmt::Debug for VaultwardenProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VaultwardenProvider")
@@ -98,16 +98,16 @@ impl VaultwardenProvider {
         Ok(Self {
             client: Client::from_base(base_url).map_err(map_api)?,
             cache_path: None,
-            #[cfg(all(feature = "webauthn", debug_assertions))]
+            #[cfg(all(any(feature = "webauthn", feature = "fidoh"), debug_assertions))]
             assertion_hook: None,
         })
     }
 
     /// Install a ceremony stand-in (tests only — the hook is compiled out
     /// of release builds). The closure receives the decoded challenge and
-    /// returns the `twoFactorToken` blob, exactly as `perform_assertion`
-    /// would against a hardware key.
-    #[cfg(all(feature = "webauthn", debug_assertions))]
+    /// returns the `twoFactorToken` blob, exactly as the ceremony (legacy
+    /// or fidoh) would against a hardware key.
+    #[cfg(all(any(feature = "webauthn", feature = "fidoh"), debug_assertions))]
     pub fn with_assertion_hook(
         mut self,
         hook: impl Fn(
@@ -352,7 +352,7 @@ impl Provider for VaultwardenProvider {
             })
             .transpose()?;
 
-        #[cfg(feature = "webauthn")]
+        #[cfg(any(feature = "webauthn", feature = "fidoh"))]
         let (second, webauthn_selected) = match second {
             // WebAuthn (wire 7) has no operator-supplied code: the answer is
             // produced in `answer_two_factor` from the live challenge, so the
@@ -362,7 +362,7 @@ impl Provider for VaultwardenProvider {
             Some((7u8, _)) => (None, true),
             other => (other, false),
         };
-        #[cfg(not(feature = "webauthn"))]
+        #[cfg(not(any(feature = "webauthn", feature = "fidoh")))]
         let webauthn_selected = false;
 
         let pre_raw: serde_json::Value = self.client.prelogin(&email).await.map_err(map_api)?.0;
@@ -640,8 +640,20 @@ impl VaultwardenProvider {
             answer @ (Some((0, _)) | Some((1, _))) => Ok(answer.map(|(p, t)| (p, t.to_string()))),
             // WebAuthn selected.
             Some((7, _)) => {
-                #[cfg(feature = "webauthn")]
+                // fidoh-backed ceremony (stage 1 of add-fidoh-ceremony-
+                // provider): authoritative whenever the fidoh feature is
+                // compiled in — including alongside `webauthn` (design:
+                // deterministic precedence, fidoh wins). Challenge decode,
+                // origin, clientDataJSON, and the wire shape are byte-
+                // identical to the legacy path; the ceremony runs inside
+                // fidoh's single handed-in budget (no outer timeout wrap —
+                // the unbounded-keepalive hang class is specified out of
+                // existence), and errors map per design.md §error mapping:
+                // decline/mismatch → Auth (3), no-device/transport/budget
+                // → Transport (4), assembly/panic → Server (4).
+                #[cfg(feature = "fidoh")]
                 {
+                    use crate::webauthn::FidohCeremonyError;
                     let ch = crate::webauthn::challenge_from_body(challenge_body)
                         .map_err(|e| ProviderError::Auth(format!("{e}")))?;
                     #[cfg(debug_assertions)]
@@ -649,19 +661,64 @@ impl VaultwardenProvider {
                         let token = hook(&ch).map_err(|e| ProviderError::Auth(format!("{e}")))?;
                         return Ok(Some((7, token.expose_secret().to_string())));
                     }
+                    // The ceremony runs on its own thread (blocking device
+                    // I/O, dedicated current_thread runtime inside). The
+                    // ceremony budget bounds the result-channel wait too: a
+                    // wedged ceremony surfaces typed Transport within the
+                    // budget — never an indefinite join. (The budget bounds
+                    // both sides: inside fidoh every wait consumes the same
+                    // handed-in Deadline's remainder.)
+                    let budget = crate::webauthn::ceremony_budget();
+                    let (tx, rx) = std::sync::mpsc::channel();
                     let ch = std::clone::Clone::clone(&ch);
-                    let token = std::thread::spawn(move || crate::webauthn::perform_assertion(&ch))
-                        .join()
-                        .map_err(|_| ProviderError::Server("webauthn thread panicked".into()))?
-                        .map_err(|e| ProviderError::Auth(format!("{e}")))?;
+                    std::thread::spawn(move || {
+                        let _ = tx.send(crate::webauthn::fidoh_perform_assertion(&ch));
+                    });
+                    let token = rx
+                        .recv_timeout(budget)
+                        .map_err(|_| FidohCeremonyError::BudgetExpired {
+                            phase: "ceremony-thread",
+                            budget: budget.as_secs(),
+                        })
+                        .and_then(|inner| inner)
+                        .map_err(|e| match e.exit_class() {
+                            "auth" => ProviderError::Auth(e.to_string()),
+                            "transport" => ProviderError::Transport(e.to_string()),
+                            _ => ProviderError::Server(e.to_string()),
+                        })?;
                     Ok(Some((7, token.expose_secret().to_string())))
                 }
-                #[cfg(not(feature = "webauthn"))]
-                Err(ProviderError::Auth(
-                    "server demanded webauthn (security-key) two-factor but this build \
-                     lacks hardware-key support; rebuild with --features webauthn"
-                        .into(),
-                ))
+                // Legacy webauthn-authenticator-rs ceremony: byte-identical
+                // while the fidoh feature is off (stage-1 fence).
+                #[cfg(not(feature = "fidoh"))]
+                {
+                    #[cfg(feature = "webauthn")]
+                    {
+                        let ch = crate::webauthn::challenge_from_body(challenge_body)
+                            .map_err(|e| ProviderError::Auth(format!("{e}")))?;
+                        #[cfg(debug_assertions)]
+                        if let Some(hook) = &self.assertion_hook {
+                            let token =
+                                hook(&ch).map_err(|e| ProviderError::Auth(format!("{e}")))?;
+                            return Ok(Some((7, token.expose_secret().to_string())));
+                        }
+                        let ch = std::clone::Clone::clone(&ch);
+                        let token =
+                            std::thread::spawn(move || crate::webauthn::perform_assertion(&ch))
+                                .join()
+                                .map_err(|_| {
+                                    ProviderError::Server("webauthn thread panicked".into())
+                                })?
+                                .map_err(|e| ProviderError::Auth(format!("{e}")))?;
+                        Ok(Some((7, token.expose_secret().to_string())))
+                    }
+                    #[cfg(not(feature = "webauthn"))]
+                    Err(ProviderError::Auth(
+                        "server demanded webauthn (security-key) two-factor but this build \
+                         lacks hardware-key support; rebuild with --features webauthn"
+                            .into(),
+                    ))
+                }
             }
             Some((n, _)) => Err(ProviderError::Auth(format!(
                 "no answerable code for two-factor provider {n}"

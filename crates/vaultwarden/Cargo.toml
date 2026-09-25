@@ -31,12 +31,43 @@ tracing.workspace = true
 webauthn-authenticator-rs = { workspace = true, optional = true }
 secrecy = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+# Cleanroom CTAP2.1 getAssertion stack (openspec add-fidoh-ceremony-provider).
+# In-house git deps pinned by rev — a deliberate, recorded dependency-policy
+# deviation (deny.toml [sources] carries the rationale); bumping the revs is a
+# deliberate act, all five revs move together (same fidoh workspace commit).
+# Hardware transports + runtime adapter ONLY: hid, pcsc, tokio — the
+# soft-token transport is never enabled by a product feature. The `fidoh`
+# facade is pulled for version/license metadata; its lib re-exports nothing,
+# so the API is consumed through the per-crate crates (their documented
+# interface).
+fidoh = { version = "0.1.0-alpha.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "7dd03e877116454ccb8feefbea9f356431ae200a" }
+fidoh-core = { version = "0.1.0-alpha.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "7dd03e877116454ccb8feefbea9f356431ae200a" }
+fidoh-tokio = { version = "0.1.0-alpha.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "7dd03e877116454ccb8feefbea9f356431ae200a" }
+fidoh-transport-hid = { version = "0.1.0-alpha.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "7dd03e877116454ccb8feefbea9f356431ae200a" }
+fidoh-transport-pcsc = { version = "0.1.0-alpha.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "7dd03e877116454ccb8feefbea9f356431ae200a", features = [
+    "std",
+    "pcsc",
+] }
 
 [features]
 default = []
 # Hardware security-key second factor (provider 7). USB + NFC only, no soft
 # tokens by policy: the point is a hardware root of trust.
 webauthn = ["dep:webauthn-authenticator-rs", "dep:secrecy", "dep:tokio"]
+# fidoh-backed CTAP2 ceremony (stage 1 of add-fidoh-ceremony-provider): the
+# provider-7 ceremony is served by fidoh's getAssertion. Off by default; when
+# both this and `webauthn` are on, the fidoh path is authoritative. Hardware
+# transports only: the soft-token transport is never enabled by a product
+# feature (fidoh-transport-soft appears in no dependency edge).
+fidoh = [
+    "dep:fidoh",
+    "dep:fidoh-core",
+    "dep:fidoh-tokio",
+    "dep:fidoh-transport-hid",
+    "dep:fidoh-transport-pcsc",
+    "dep:secrecy",
+    "dep:tokio",
+]
 
 [dev-dependencies]
 wiremock.workspace = true

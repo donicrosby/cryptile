@@ -170,6 +170,21 @@ Without the feature, the same challenge fails with a remediation hint naming
 the feature. Soft tokens are deliberately not supported: no browser pops up,
 no phone app is consulted.
 
+**Alternative CTAP2 stack (`fidoh` feature, stage 1).** An opt-in alternative
+ceremony backend exists behind the `fidoh` cargo feature (off by default,
+independent of `webauthn`; when both are built, the fidoh path is
+authoritative). It serves the identical provider-7 wire contract through the
+owner's cleanroom CTAP2.1 client
+([github.com/donicrosby/fidoh](https://github.com/donicrosby/fidoh),
+rev-pinned) and carries an explicit 60 s ceremony budget: a wedged key or a
+touch never given fails with a typed "budget expired" error (exit 4, with a
+remediation hint) instead of an unbounded wait — the failure class the
+`webauthn` path needs an outer timeout to bound. Hardware transports only
+(usb HID + PC/SC); on the fidoh path, no-device and transport failures map
+to exit 4 rather than exit 3. Stage-2 caveat: this is a staged cutover —
+the default path does not move until the named stage-2 follow-up flips it,
+and the two paths' exit-code divergence is unified then.
+
 ## License
 
 Apache-2.0. No Bitwarden code, no `bitwarden-sdk` (GPLv3) — crypto implemented

@@ -49,3 +49,17 @@ skip = []
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# github.com/donicrosby/fidoh — the owner's own cleanroom CTAP2.1 client
+# stack (Apache-2.0), replacing the distrusted webauthn-authenticator-rs
+# ceremony (openspec add-fidoh-ceremony-provider). This is the deliberate,
+# recorded DEPENDENCY-POLICY deviation ("ecosystem crates over in-house"):
+# fidoh is in-house BY DESIGN — a replacement, not a stealth build-out —
+# because the grievances (unbounded keepalive loop, parallel-transport
+# races, no FIDO-over-CCID) live in the replaced crate's design and cannot
+# be fixed from outside. Rev-pinned in crates/vaultwarden/Cargo.toml;
+# bumping the rev is a deliberate act. The git dep is off by default
+# (`fidoh` cargo feature); hardware transports only — fidoh's soft-token
+# transport is never enabled by a product feature.
+allow-git = [
+    "https://github.com/donicrosby/fidoh",
+]

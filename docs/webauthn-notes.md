@@ -10,6 +10,14 @@ below so the next operator knows what was verified and against what.
 - A CTAP2-capable hardware key (usb or nfc transport only).
 - A Vaultwarden server with WebAuthn 2FA enabled for your account.
 
+> **fidoh-path note (add-fidoh-ceremony-provider, stage 1):** builds with the
+> opt-in `--features fidoh` serve the same ceremony through the fidoh library,
+> which carries an **explicit 60 s ceremony budget** handed in by cryptile — a
+> wedged key or a touch never given fails typed ("budget expired") within that
+> budget instead of hanging. The outer-timeout triage below stays
+> legacy-path-only (`--features webauthn`); on the fidoh path the budget is
+> inside the library and there is nothing to wrap.
+
 ## Procedure
 
 1. Plain login and observe the challenge:
