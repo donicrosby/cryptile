@@ -37,8 +37,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      # pcsc-sys (fidoh-transport-pcsc) builds against PCSCLite headers.
-      - run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev pkg-config
+      # pcsc-sys (fidoh-transport-pcsc) and libudev-sys (the legacy
+      # webauthn stack: webauthn-authenticator-rs -> fido-hid-rs -> udev)
+      # build against system headers; the featured webauthn,fidoh leg is
+      # the first CI job ever to compile the legacy USB path (default
+      # features never pull it).
+      - run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev libudev-dev pkg-config
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --features ${{ matrix.features }} -- -D warnings
       - run: cargo test --workspace --features ${{ matrix.features }}
