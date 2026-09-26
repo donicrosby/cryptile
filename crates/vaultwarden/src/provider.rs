@@ -442,7 +442,7 @@ impl Provider for VaultwardenProvider {
     async fn list_namespaces(&self, s: &Session) -> Result<Vec<Namespace>, ProviderError> {
         let sess: VwSession = parse_session(s)?;
         let user_key = sess_user_key(&sess)?;
-        let (sync, _org_keys, collections) =
+        let (sync, org_keys, collections) =
             self.sync_and_keys(&sess.access_token, &user_key).await?;
         // One namespace per organization (name from collections), plus the
         // personal vault as the empty-id namespace.
@@ -453,7 +453,9 @@ impl Provider for VaultwardenProvider {
                 name: name.clone(),
             });
         }
-        let _ = &sync;
+        // Full sync happened: rewrite the cache like every other full-sync
+        // path, so a bare `list` alone warms get's targeted fetch.
+        self.write_cache(&sess, &user_key, &sync, &org_keys, &collections);
         out.push(Namespace {
             id: String::new(),
             name: "personal".into(),
