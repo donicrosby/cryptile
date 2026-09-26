@@ -74,6 +74,18 @@ pub trait Provider: Send + Sync {
 
     async fn login(&self, params: LoginParams) -> Result<Session, ProviderError>;
 
+    /// Can this build answer a hardware (provider-7 CTAP2) two-factor
+    /// offer? Backend knowledge by design: whether a CTAP2 ceremony
+    /// backend is compiled in (and which) is the provider's business —
+    /// the CLI asks instead of naming backend feature matrices. Returns
+    /// `false` for code-carrying factors (totp/email); the resolver
+    /// owns those. Default `false`: backends without a ceremony path
+    /// keep the skip-and-remediate behavior.
+    fn answers_two_factor(&self, provider_tag: &str) -> bool {
+        let _ = provider_tag;
+        false
+    }
+
     /// Rotate the session's access token using its refresh token. The new
     /// session replaces the old; `AuthExpired` means no refresh token (or it
     /// was rejected) — the caller must re-login with the master secret.
