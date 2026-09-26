@@ -209,6 +209,17 @@ cryptile-vaultwarden only. The no-soft-token policy carries over: the
 product feature enables hardware transports only, never fidoh's
 soft-token transport.
 
+With fidoh beta.1 (add-client-pin), the provider SHALL additionally
+accept an optional PIN provider (`fidoh_core::pin::PinProviderHandle`)
+on the assertion entry point and thread it into the ceremony input; the
+vaultwarden library itself SHALL NOT perform I/O to obtain a PIN. The
+provider SHALL be invoked only when the ceremony's clientPIN acquisition
+demands it (server-requested verification with a PIN-set key); flows
+that never acquire a PIN (`Discouraged` posture, PIN-less keys) SHALL
+NOT invoke it. When no provider is supplied and acquisition is demanded,
+the ceremony SHALL fail typed (`PinRequired`) rather than degrade to an
+unverified assertion.
+
 #### Scenario: fidoh feature serves provider-7 with identical wire shape
 
 - WHEN the crate is built with `--features fidoh` and `login()` is called
@@ -244,6 +255,27 @@ soft-token transport.
   (`twoFactorProvider=7`, `twoFactorToken`) on the assertion resubmit,
   with the token-endpoint call count pinned at exactly two inside one
   `login()` and no `TwoFactorRequired` surfaced to the caller
+
+#### Scenario: provider threads into the ceremony input
+
+- WHEN the fidoh path builds the beta.1 `GetAssertionExchange`
+- THEN the optional PIN provider field carries the caller-supplied
+  handle (or `None`), and the raw pinUvAuth fields stay `None`
+  (acquisition is fidoh's job; protocol preference order is the
+  authenticator's)
+
+#### Scenario: provider is lazy
+
+- WHEN the server's challenge says `discouraged`, or the plugged key
+  advertises no PIN capability
+- THEN the provider closure is never invoked and no prompt appears
+
+#### Scenario: no provider and PIN demanded fails typed
+
+- WHEN clientPIN acquisition is demanded and no provider is wired
+  (headless run)
+- THEN login fails with the AUTH-class error and a remediation hint
+  naming `PinRequired` (set a key PIN, or run interactively)
 
 ### Requirement: fidoh ceremony budget and hang-freedom
 
@@ -292,6 +324,12 @@ unclassified string without an exit-code class. The server's rejection
 of the assertion resubmit remains AUTH class per the existing
 resubmission requirement, unchanged by this mapping.
 
+With fidoh beta.1's clientPIN work, user-side PIN outcomes SHALL map to
+the AUTH class with remediation hints: `PinRequired`, `PinNotSet`,
+`PinTooLong`, `IncorrectPin` with a spent retry counter, `PinBlocked`,
+and `PinAuthBlocked`. `PinProviderFailed` (caller-side I/O failure, not
+a user-authentication outcome) SHALL map to the TRANSPORT class.
+
 #### Scenario: user decline maps to auth
 
 - WHEN the fidoh ceremony returns a user-decline outcome (touch refused,
@@ -321,6 +359,19 @@ resubmission requirement, unchanged by this mapping.
 - THEN the provider maps it to exactly one exit-code class per the
   mapping above, with no variant falling through to an unclassified
   error
+
+#### Scenario: user-side PIN failures map to auth
+
+- WHEN the ceremony returns `PinRequired`, `PinNotSet`, `PinTooLong`,
+  a spent `IncorrectPin` retry counter, `PinBlocked`, or `PinAuthBlocked`
+- THEN login fails with the AUTH-class error (exit 3) and the message
+  names the specific condition (PIN not set / wrong PIN with remaining
+  retries / retry counter exhausted / authenticator PIN locked)
+
+#### Scenario: provider I-O failure maps to transport
+
+- WHEN the ceremony returns `PinProviderFailed`
+- THEN login fails with the TRANSPORT-class error (exit 4)
 
 ### Requirement: fidoh path honors the server-requested user verification posture
 
