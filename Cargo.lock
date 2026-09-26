@@ -1015,16 +1015,16 @@ dependencies = [
 
 [[package]]
 name = "fidoh"
-version = "0.1.0-beta.1"
-source = "git+https://github.com/donicrosby/fidoh.git?rev=ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8#ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8"
+version = "0.1.0"
+source = "git+https://github.com/donicrosby/fidoh.git?tag=v0.1.0#f47d58a60219ed7d9aa77c4e1fd3018e906df8bd"
 dependencies = [
  "fidoh-core",
 ]
 
 [[package]]
 name = "fidoh-core"
-version = "0.1.0-beta.1"
-source = "git+https://github.com/donicrosby/fidoh.git?rev=ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8#ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8"
+version = "0.1.0"
+source = "git+https://github.com/donicrosby/fidoh.git?tag=v0.1.0#f47d58a60219ed7d9aa77c4e1fd3018e906df8bd"
 dependencies = [
  "aes 0.8.4",
  "cbc 0.1.2",
@@ -1037,8 +1037,8 @@ dependencies = [
 
 [[package]]
 name = "fidoh-tokio"
-version = "0.1.0-beta.1"
-source = "git+https://github.com/donicrosby/fidoh.git?rev=ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8#ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8"
+version = "0.1.0"
+source = "git+https://github.com/donicrosby/fidoh.git?tag=v0.1.0#f47d58a60219ed7d9aa77c4e1fd3018e906df8bd"
 dependencies = [
  "fidoh-core",
  "tokio",
@@ -1046,16 +1046,16 @@ dependencies = [
 
 [[package]]
 name = "fidoh-transport-hid"
-version = "0.1.0-beta.1"
-source = "git+https://github.com/donicrosby/fidoh.git?rev=ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8#ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8"
+version = "0.1.0"
+source = "git+https://github.com/donicrosby/fidoh.git?tag=v0.1.0#f47d58a60219ed7d9aa77c4e1fd3018e906df8bd"
 dependencies = [
  "fidoh-core",
 ]
 
 [[package]]
 name = "fidoh-transport-pcsc"
-version = "0.1.0-beta.1"
-source = "git+https://github.com/donicrosby/fidoh.git?rev=ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8#ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8"
+version = "0.1.0"
+source = "git+https://github.com/donicrosby/fidoh.git?tag=v0.1.0#f47d58a60219ed7d9aa77c4e1fd3018e906df8bd"
 dependencies = [
  "fidoh-core",
  "pcsc",

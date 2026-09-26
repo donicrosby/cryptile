@@ -40,11 +40,11 @@ tokio = { workspace = true, optional = true }
 # facade is pulled for version/license metadata; its lib re-exports nothing,
 # so the API is consumed through the per-crate crates (their documented
 # interface).
-fidoh = { version = "0.1.0-beta.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8" }
-fidoh-core = { version = "0.1.0-beta.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8" }
-fidoh-tokio = { version = "0.1.0-beta.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8" }
-fidoh-transport-hid = { version = "0.1.0-beta.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8" }
-fidoh-transport-pcsc = { version = "0.1.0-beta.1", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", rev = "ad5fe7c2dec9f2fcb5fd275b3eeb49dba2ed24c8", features = [
+fidoh = { version = "0.1.0", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", tag = "v0.1.0" }
+fidoh-core = { version = "0.1.0", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", tag = "v0.1.0" }
+fidoh-tokio = { version = "0.1.0", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", tag = "v0.1.0" }
+fidoh-transport-hid = { version = "0.1.0", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", tag = "v0.1.0" }
+fidoh-transport-pcsc = { version = "0.1.0", default-features = false, optional = true, git = "https://github.com/donicrosby/fidoh.git", tag = "v0.1.0", features = [
     "std",
     "pcsc",
 ] }
