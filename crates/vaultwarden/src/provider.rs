@@ -307,6 +307,14 @@ impl Provider for VaultwardenProvider {
         "vw"
     }
 
+    /// CTAP2 ceremony backend compiled in? fidoh when present
+    /// (authoritative), legacy webauthn otherwise. The CLI consults this
+    /// instead of naming backend features, keeping the CLI seam
+    /// backend-neutral.
+    fn answers_two_factor(&self, provider_tag: &str) -> bool {
+        provider_tag == "webauthn" && cfg!(any(feature = "webauthn", feature = "fidoh"))
+    }
+
     /// Refresh via the refresh-token grant. The user key outlives tokens (it
     /// is unrelated to them), so the new session keeps it. `AuthExpired` when
     /// no refresh token was stored — callers re-login with the master password.
@@ -995,5 +1003,25 @@ mod two_factor_tests {
         assert_eq!(tag_to_wire_id("yubikey"), None);
         assert_eq!(tag_to_wire_id("unknown()"), None);
         assert_eq!(tag_to_wire_id("unknown(-1)"), None);
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    /// default-fidoh-backend: the probe is the CLI's only hardware
+    /// answerability signal, so it must track the compiled CTAP2
+    /// ceremony backend exactly (fidoh when present, legacy webauthn
+    /// otherwise, neither when both are off).
+    #[test]
+    fn answers_two_factor_tracks_compiled_ctap2_backend() {
+        let p = VaultwardenProvider::new("https://vault.example.invalid").unwrap();
+        let expected = cfg!(any(feature = "webauthn", feature = "fidoh"));
+        assert_eq!(p.answers_two_factor("webauthn"), expected);
+        // Code factors and unknown tags are never a backend capability.
+        assert!(!p.answers_two_factor("totp"));
+        assert!(!p.answers_two_factor("email"));
+        assert!(!p.answers_two_factor("unknown(9)"));
     }
 }

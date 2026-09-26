@@ -24,12 +24,16 @@ tracing-subscriber.workspace = true
 rpassword.workspace = true
 
 [features]
-default = []
-# Passthrough: builds the vaultwarden provider with hardware-key support.
+# default-fidoh-backend: plain `cargo build` / `cargo install`
+# produces the fidoh-backed binary. Legacy escape hatch:
+# --no-default-features --features webauthn
+default = ["fidoh"]
+# Passthrough: LEGACY CTAP2 stack (webauthn-authenticator-rs), escape
+# hatch only. When both this and fidoh are on, the fidoh path wins.
 webauthn = ["cryptile-vaultwarden/webauthn"]
-# Passthrough: builds the vaultwarden provider with the fidoh CTAP2
-# backend (typed PIN provider, UV pass-through). Off by default — the
-# staged cutover of the *default* build is a separate change.
+# Passthrough: fidoh CTAP2 backend (typed PIN provider, UV
+# pass-through). On by default (see `default` above); bare
+# --no-default-features --features fidoh still works.
 fidoh = ["cryptile-vaultwarden/fidoh"]
 
 [dev-dependencies]

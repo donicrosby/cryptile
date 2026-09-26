@@ -154,6 +154,8 @@ fn pin_source_for_login() -> Option<cryptile_core::provider::PinSource> {
     }))
 }
 
+/// `hardware_capable` is the linked backend's answerability probe
+/// result (`Provider::answers_two_factor`), computed by the caller.
 /// Choose the second factor for a challenge: explicit `--2fa-provider`
 /// overrides the preference order webauthn → totp → email; a tag the
 /// backend offered but we cannot answer (e.g. webauthn without the
@@ -165,13 +167,14 @@ fn resolve_second_factor(
     provider_pref: Option<&str>,
     code_flag: Option<String>,
     code_env: Option<&str>,
+    hardware_capable: bool,
 ) -> Result<cryptile_core::provider::SecondFactor, String> {
     let answerable = |tag: &str| match tag {
         "totp" | "email" => true,
         // Hardware keys need no code source; the CTAP2 ceremony in the
         // provider is the answer. Without the compile-time feature the tag
         // is unanswerable and gets skipped (and named in the failure hint).
-        "webauthn" => cfg!(feature = "webauthn"),
+        "webauthn" => hardware_capable,
         _ => false,
     };
     let pick = || -> Result<String, String> {
@@ -182,7 +185,7 @@ fn resolve_second_factor(
                     offered.join(", ")
                 ));
             }
-            if p == "webauthn" && !cfg!(feature = "webauthn") {
+            if p == "webauthn" && !hardware_capable {
                 return Err(
                     "this build lacks security-key (webauthn) support; rebuild with \
                      --features webauthn"
@@ -207,7 +210,10 @@ fn resolve_second_factor(
     // WebAuthn carries no operator-supplied code: the provider runs the
     // device ceremony against the live challenge. The empty secret is a
     // placeholder the provider replaces with the assertion blob.
-    #[cfg(feature = "webauthn")]
+    // Reachable only when the probe said the linked backend can answer
+    // provider 7, so no compile-time feature gate is needed here: the
+    // hardware factor carries no operator code (empty placeholder the
+    // provider replaces with the assertion blob).
     if provider_tag == "webauthn" {
         return Ok(cryptile_core::provider::SecondFactor {
             provider_tag,
@@ -338,11 +344,16 @@ async fn main() -> ExitCode {
                 match provider.login(params(None)).await {
                     Ok(s) => s,
                     Err(ProviderError::TwoFactorRequired { providers }) => {
+                        // Ask the linked backend (default build: fidoh
+                        // inside the VW provider) whether a hardware
+                        // offer can be answered; no feature matrix here.
+                        let hardware_capable = provider.answers_two_factor("webauthn");
                         let second = match resolve_second_factor(
                             &providers,
                             twofa_provider.as_deref(),
                             twofa_code.clone(),
                             twofa_env.as_deref(),
+                            hardware_capable,
                         ) {
                             Ok(s) => s,
                             Err(msg) => return die(msg, 3),

@@ -153,7 +153,8 @@ resubmit handles servers that require re-presenting the token on the very
 next request.
 
 **FIDO2 / WebAuthn (hardware keys).** Available only when cryptile was built
-with the `webauthn` cargo feature (off by default; usb + nfc transports). The
+with the `webauthn` cargo feature (off by default; the legacy escape
+hatch, see below; usb + nfc transports). The
 feature needs `pkg-config` and `libudev` headers to build (`apt install
 pkg-config libudev-dev` on Debian/Ubuntu). A challenge of type `webauthn`
 with the feature built in runs a CTAP2 assertion against your plugged-in
@@ -166,24 +167,29 @@ cryptile login --server https://vw.internal --account you@corp.com \
     --2fa-provider webauthn
 ```
 
-Without the feature, the same challenge fails with a remediation hint naming
-the feature. Soft tokens are deliberately not supported: no browser pops up,
+Without either CTAP2 backend (a `--no-default-features` build), the same
+challenge fails with a remediation hint. Soft tokens are deliberately not supported: no browser pops up,
 no phone app is consulted.
 
-**Alternative CTAP2 stack (`fidoh` feature, stage 1).** An opt-in alternative
-ceremony backend exists behind the `fidoh` cargo feature (off by default,
-independent of `webauthn`; when both are built, the fidoh path is
-authoritative). It serves the identical provider-7 wire contract through the
-owner's cleanroom CTAP2.1 client
+**CTAP2 hardware stack (default, `fidoh` feature).** The default build
+(`cargo build` / `cargo install`, no feature flags) serves the provider-7
+ceremony through the owner's cleanroom CTAP2.1 client
 ([github.com/donicrosby/fidoh](https://github.com/donicrosby/fidoh),
-rev-pinned) and carries an explicit 60 s ceremony budget: a wedged key or a
-touch never given fails with a typed "budget expired" error (exit 4, with a
-remediation hint) instead of an unbounded wait — the failure class the
-`webauthn` path needs an outer timeout to bound. Hardware transports only
-(usb HID + PC/SC); on the fidoh path, no-device and transport failures map
-to exit 4 rather than exit 3. Stage-2 caveat: this is a staged cutover —
-the default path does not move until the named stage-2 follow-up flips it,
-and the two paths' exit-code divergence is unified then.
+rev-pinned). It honors the server-requested user-verification posture,
+acquires the key PIN on the tty only when the ceremony demands it
+(headless runs fail typed instead of prompting), and carries an explicit
+60 s ceremony budget: a wedged key or a touch never given fails with a
+typed "budget expired" error (exit 4, with a remediation hint) instead
+of an unbounded wait. Hardware transports only (usb HID + PC/SC); no-device
+and transport failures map to exit 4 rather than exit 3.
+
+**Legacy escape hatch (`webauthn` feature).** The replaced
+`webauthn-authenticator-rs` stack stays reachable one more cycle: build
+with `--no-default-features --features webauthn` (it needs `pkg-config`
+and `libudev` headers). Its provider-7 wire shape is identical and it
+keeps the hardcoded discouraged posture; a later change deletes it and
+unifies the paths' exit codes. Bare `--no-default-features --features
+fidoh` also remains a valid way to opt in explicitly.
 
 ## License
 
