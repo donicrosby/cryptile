@@ -140,6 +140,7 @@ async fn env(cache: bool, tag: &str) -> Env {
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
 
             second_factor: None,
+            pin_source: None,
         })
         .await
         .unwrap();

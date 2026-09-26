@@ -138,6 +138,22 @@ fn read_secret(prompt: &str) -> Result<SecStr, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Hardware-key PIN source for interactive logins: prompts on the tty,
+/// only when the ceremony's clientPIN acquisition actually demands a PIN
+/// (server-requested verification + PIN-set key). Headless runs get
+/// `None` — acquisition then fails typed instead of hanging on an
+/// unreadable prompt. Backend-neutral by design: no fidoh types here.
+fn pin_source_for_login() -> Option<cryptile_core::provider::PinSource> {
+    if !std::io::stdin().is_terminal() {
+        return None;
+    }
+    Some(Box::new(move || {
+        rpassword::prompt_password("YubiKey PIN: ")
+            .map(|pin| pin.into_bytes())
+            .map_err(|_e| ())
+    }))
+}
+
 /// Choose the second factor for a challenge: explicit `--2fa-provider`
 /// overrides the preference order webauthn → totp → email; a tag the
 /// backend offered but we cannot answer (e.g. webauthn without the
@@ -316,6 +332,7 @@ async fn main() -> ExitCode {
                         account: account.clone(),
                         secret: secret.clone(),
                         second_factor: second,
+                        pin_source: pin_source_for_login(),
                     }
                 };
                 match provider.login(params(None)).await {

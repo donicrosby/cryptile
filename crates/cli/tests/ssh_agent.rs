@@ -132,6 +132,7 @@ async fn seed_state(
             account: fx["email"].as_str().unwrap().into(),
             secret: secrecy::SecretString::from(fx["password"].as_str().unwrap()),
             second_factor: None,
+            pin_source: None,
         })
         .await
         .unwrap();

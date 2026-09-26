@@ -51,7 +51,18 @@ pub struct LoginParams {
     /// Second-factor answer, present only on the challenge retry call.
     /// `None` = plain password grant.
     pub second_factor: Option<SecondFactor>,
+    /// Lazy PIN source for hardware-key user verification (clientPIN
+    /// acquisition in the CTAP2 ceremony). Invoked at most once per
+    /// ceremony, ONLY when verification demands a PIN; `None` means
+    /// acquisition fails typed instead of prompting (headless-safe).
+    /// Return the PIN bytes; `Err(())` surfaces as a provider-I/O
+    /// failure, never as a wrong-PIN authentication outcome.
+    pub pin_source: Option<PinSource>,
 }
+
+/// A caller-supplied PIN prompt, kept backend-neutral by design: the
+/// CLI never names the hardware library, the library never does I/O.
+pub type PinSource = Box<dyn FnMut() -> Result<Vec<u8>, ()> + Send>;
 
 /// The backend facade: one trait, every secret backend the same shape.
 /// Object-safe so the CLI holds `Box<dyn Provider>` and dispatches on the

@@ -247,6 +247,7 @@ mod fidoh_backend {
     use fidoh_core::device::{ChannelId, CtapCommand, Device, DeviceEvent};
     use fidoh_core::error::{CeremonyError, DiscoveryDiagnostic, Error};
     use fidoh_core::get_assertion::{CredentialType, PublicKeyCredentialDescriptor};
+    use fidoh_core::pin::{PinProviderHandle, PinSourceError};
     use fidoh_core::sleep::SleepHandle;
     use fidoh_core::time::Deadline;
     use fidoh_core::transport::{
@@ -374,7 +375,7 @@ mod fidoh_backend {
     /// Map fidoh's typed ceremony outcomes onto cryptile's classes. Total
     /// over `CeremonyError` — exhaustively matched so a new fidoh variant is
     /// a compile error here, not an unclassified string at runtime.
-    fn map_ceremony_error(e: CeremonyError) -> FidohCeremonyError {
+    pub(crate) fn map_ceremony_error(e: CeremonyError) -> FidohCeremonyError {
         match e {
             CeremonyError::NoDevice(diags) => FidohCeremonyError::NoDevice(render_diags(&diags)),
             CeremonyError::AmbiguousDevice(candidates) => FidohCeremonyError::Transport(format!(
@@ -411,6 +412,21 @@ mod fidoh_backend {
                 }
             }
             CeremonyError::CredentialMismatch { .. } => FidohCeremonyError::WrongCredential,
+            // fidoh beta.1 clientPIN outcomes (add-fidoh-pin-provider):
+            // user-side credential/consent state is AUTH, caller-side I/O
+            // (the PIN source itself) is TRANSPORT.
+            CeremonyError::PinRequired => FidohCeremonyError::Declined("the key requires its PIN to verify (PinRequired): set a key PIN or run interactively".to_string()),
+            CeremonyError::PinNotSet => FidohCeremonyError::Declined("verification requires a PIN but the key has none set (PinNotSet): set a PIN on the key".to_string()),
+            CeremonyError::PinTooLong => FidohCeremonyError::Declined("the provided PIN exceeds the authenticator's limit (PinTooLong)".to_string()),
+            CeremonyError::IncorrectPin { remaining_retries } => {
+                FidohCeremonyError::Declined(match remaining_retries {
+                    Some(n) => format!("wrong key PIN: {n} attempt(s) remaining"),
+                    None => format!("wrong key PIN: {e}"),
+                })
+            }
+            CeremonyError::PinBlocked => FidohCeremonyError::Declined("key PIN retry counter exhausted (PinBlocked): unplug and replug the key to reset, then use the correct PIN".to_string()),
+            CeremonyError::PinAuthBlocked => FidohCeremonyError::Declined("authenticator PIN is locked after repeated failures (PinAuthBlocked): reset the key before retrying".to_string()),
+            CeremonyError::PinProviderFailed => FidohCeremonyError::Transport("the PIN source failed before the key could be asked (PinProviderFailed)".to_string()),
         }
     }
 
@@ -482,6 +498,7 @@ mod fidoh_backend {
         client_data_hash: Vec<u8>,
         allow: Vec<PublicKeyCredentialDescriptor>,
         uv: UvPosture,
+        pin_provider: Option<PinProviderHandle>,
     ) -> GetAssertionExchange {
         GetAssertionExchange {
             rp_id: rp_id.to_string(),
@@ -493,6 +510,9 @@ mod fidoh_backend {
             },
             pin_uv_auth: None,
             drain: None,
+            entropy: None,
+            pin_provider,
+            pin_uv_auth_protocol: None,
         }
     }
 
@@ -599,13 +619,23 @@ mod fidoh_backend {
     /// [`ceremony_budget`].
     pub fn fidoh_perform_assertion(
         ch: &WebauthnChallenge,
+        pin_source: Option<cryptile_core::provider::PinSource>,
     ) -> Result<SecretString, FidohCeremonyError> {
         let origin = super::origin_for_rp_id(&ch.rp_id)
             .ok_or_else(|| FidohCeremonyError::Assembly(format!("unusable rpId '{}'", ch.rp_id)))?;
         let (challenge_bytes, allow) = assertion_request(ch)?;
         let (client_data_hash, client_data_json_bytes) =
             client_data_json(&origin, &b64url_nopad(&challenge_bytes));
-        let xch = exchange(&ch.rp_id, client_data_hash, allow, ch.uv);
+        // Backend-neutral closure → fidoh's provider handle (the wrap is
+        // the feature boundary: this is the only place the two shapes
+        // meet). The closure is lazy — fidoh invokes it only when
+        // clientPIN acquisition demands a PIN.
+        let pin_provider = pin_source.map(|mut src| {
+            PinProviderHandle::from_closure(move || {
+                src().map_err(|()| PinSourceError { _context: () })
+            })
+        });
+        let xch = exchange(&ch.rp_id, client_data_hash, allow, ch.uv, pin_provider);
 
         // One budget for the whole ceremony (fidoh's single-Deadline model):
         // discovery, selection, connect, the probe, and the §6.2 exchange
@@ -1030,6 +1060,45 @@ mod fidoh_tests {
         );
         // Server class.
         assert_eq!(E::Assembly("x".into()).exit_class(), "server");
+        // fidoh beta.1 clientPIN outcomes (add-fidoh-pin-provider): the
+        // user-side PIN state is AUTH, the caller-side PIN source is
+        // TRANSPORT. Class-level lock on every new variant.
+        assert_eq!(E::Declined("PinRequired".into()).exit_class(), "auth");
+        assert_eq!(
+            E::Declined("PinNotSet: set a PIN on the key".into()).exit_class(),
+            "auth"
+        );
+        assert_eq!(
+            E::Transport("PinProviderFailed".into()).exit_class(),
+            "transport"
+        );
+    }
+
+    /// The full beta.1 PIN-class mapping, asserted over the real fidoh
+    /// `CeremonyError` variants through `map_ceremony_error` — the
+    /// totality lock add-fidoh-pin-provider pins in spec.
+    #[test]
+    fn pin_error_mapping_classes() {
+        use fidoh_core::error::CeremonyError as CE;
+        let class_of = |e: CE| {
+            crate::webauthn::fidoh_backend::map_ceremony_error(e)
+                .exit_class()
+                .to_string()
+        };
+        // User-side credential/consent state → AUTH.
+        assert_eq!(class_of(CE::PinRequired), "auth");
+        assert_eq!(class_of(CE::PinNotSet), "auth");
+        assert_eq!(class_of(CE::PinTooLong), "auth");
+        assert_eq!(
+            class_of(CE::IncorrectPin {
+                remaining_retries: Some(2)
+            }),
+            "auth"
+        );
+        assert_eq!(class_of(CE::PinBlocked), "auth");
+        assert_eq!(class_of(CE::PinAuthBlocked), "auth");
+        // Caller-side I/O (the PIN source itself) → TRANSPORT.
+        assert_eq!(class_of(CE::PinProviderFailed), "transport");
     }
 
     #[test]

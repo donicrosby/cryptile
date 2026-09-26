@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use cryptile_core::model::{Namespace, Secret, SecretMeta, Session};
-use cryptile_core::provider::{LoginParams, Provider, ProviderError};
+use cryptile_core::provider::{LoginParams, PinSource, Provider, ProviderError};
 use cryptile_core::{ExposeSecret, Ref};
 use zeroize::Zeroizing;
 
@@ -337,6 +337,10 @@ impl Provider for VaultwardenProvider {
     async fn login(&self, params: LoginParams) -> Result<Session, ProviderError> {
         let email = params.account.clone();
         let password = params.secret;
+        // Consumed only by the fidoh ceremony path (moved into the
+        // ceremony thread if the server challenges with provider-7;
+        // without the fidoh feature the helper ignores it).
+        let pin_source = params.pin_source;
         let second = params
             .second_factor
             .as_ref()
@@ -388,9 +392,13 @@ impl Provider for VaultwardenProvider {
         let token = match token {
             Err(ApiError::TwoFactorChallenge(body)) => {
                 let answered = if webauthn_selected {
-                    self.answer_two_factor(&body, Some((7u8, "")))?
+                    self.answer_two_factor(&body, Some((7u8, "")), pin_source)?
                 } else {
-                    self.answer_two_factor(&body, second.as_ref().map(|(p, t)| (*p, t.as_str())))?
+                    self.answer_two_factor(
+                        &body,
+                        second.as_ref().map(|(p, t)| (*p, t.as_str())),
+                        pin_source,
+                    )?
                 };
                 match answered {
                     Some((provider, token_value)) => self
@@ -634,7 +642,10 @@ impl VaultwardenProvider {
         &self,
         challenge_body: &str,
         second: Option<(u8, &str)>,
+        pin_source: Option<PinSource>,
     ) -> Result<Option<(u8, String)>, ProviderError> {
+        #[cfg(not(feature = "fidoh"))]
+        let _ = pin_source;
         match second {
             // Code factors already carry their answer.
             answer @ (Some((0, _)) | Some((1, _))) => Ok(answer.map(|(p, t)| (p, t.to_string()))),
@@ -671,8 +682,11 @@ impl VaultwardenProvider {
                     let budget = crate::webauthn::ceremony_budget();
                     let (tx, rx) = std::sync::mpsc::channel();
                     let ch = std::clone::Clone::clone(&ch);
+                    // The PIN source rides in from `LoginParams`; fidoh
+                    // invokes it at most once, only if acquisition demands
+                    // a PIN (`&mut` is the one-prompt-per-ceremony contract).
                     std::thread::spawn(move || {
-                        let _ = tx.send(crate::webauthn::fidoh_perform_assertion(&ch));
+                        let _ = tx.send(crate::webauthn::fidoh_perform_assertion(&ch, pin_source));
                     });
                     let token = rx
                         .recv_timeout(budget)

@@ -208,6 +208,7 @@ async fn full_login_sync_get_roundtrip() {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
             second_factor: None,
+            pin_source: None,
         })
         .await
         .unwrap();
@@ -409,6 +410,7 @@ async fn two_factor_challenge_resubmit_roundtrip() {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
             second_factor: None,
+            pin_source: None,
         })
         .await
         .expect_err("challenge must surface as an error");
@@ -425,6 +427,7 @@ async fn two_factor_challenge_resubmit_roundtrip() {
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            pin_source: None,
             second_factor: Some(SecondFactor {
                 provider_tag: "totp".into(),
                 code: SecretString::new(fx["twofactor"]["code"].as_str().unwrap().into()),
@@ -485,6 +488,7 @@ async fn two_factor_wrong_code_is_auth_error() {
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            pin_source: None,
             second_factor: Some(SecondFactor {
                 provider_tag: "totp".into(),
                 code: SecretString::new(fx["twofactor"]["wrong"].as_str().unwrap().into()),
@@ -578,6 +582,7 @@ async fn webauthn_resubmit_within_one_login_call() {
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            pin_source: None,
             second_factor: Some(SecondFactor {
                 provider_tag: "webauthn".into(),
                 code: SecretString::new("".into()),
@@ -651,6 +656,7 @@ async fn webauthn_rejected_assertion_is_auth_error() {
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            pin_source: None,
             second_factor: Some(SecondFactor {
                 provider_tag: "webauthn".into(),
                 code: SecretString::new("".into()),
@@ -752,6 +758,7 @@ async fn fidoh_webauthn_resubmit_matches_default_path_wire_shape() {
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            pin_source: None,
             second_factor: Some(SecondFactor {
                 provider_tag: "webauthn".into(),
                 code: SecretString::new("".into()),
@@ -840,6 +847,7 @@ async fn fidoh_declined_ceremony_maps_to_auth() {
         .login(LoginParams {
             account: fx["email"].as_str().unwrap().into(),
             secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+            pin_source: None,
             second_factor: Some(SecondFactor {
                 provider_tag: "webauthn".into(),
                 code: SecretString::new("".into()),
@@ -917,6 +925,7 @@ async fn fidoh_wedged_ceremony_fails_transport_within_budget() {
             .login(LoginParams {
                 account: fx["email"].as_str().unwrap().into(),
                 secret: SecretString::new(fx["password"].as_str().unwrap().into()),
+                pin_source: None,
                 second_factor: Some(SecondFactor {
                     provider_tag: "webauthn".into(),
                     code: SecretString::new("".into()),

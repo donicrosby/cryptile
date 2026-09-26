@@ -98,6 +98,7 @@ async fn export_env_passphrase_end_to_end() {
             account: fx["email"].as_str().unwrap().into(),
             secret: secrecy::SecretString::from(fx["password"].as_str().unwrap()),
             second_factor: None,
+            pin_source: None,
         })
         .await
         .unwrap();
@@ -321,6 +322,7 @@ async fn export_proactively_refreshes_near_expiry_session() {
             account: fx["email"].as_str().unwrap().into(),
             secret: secrecy::SecretString::from(fx["password"].as_str().unwrap()),
             second_factor: None,
+            pin_source: None,
         })
         .await
         .unwrap();
