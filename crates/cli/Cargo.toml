@@ -35,6 +35,10 @@ webauthn = ["cryptile-vaultwarden/webauthn"]
 # pass-through). On by default (see `default` above); bare
 # --no-default-features --features fidoh still works.
 fidoh = ["cryptile-vaultwarden/fidoh"]
+# Passthrough: the CCID/NFC pcsc flavor (decouple-pcsc-link). Links
+# libpcsclite; hosts without it cannot exec the resulting binary. The
+# default build deliberately omits it.
+fidoh-pcsc = ["fidoh", "cryptile-vaultwarden/fidoh-pcsc"]
 
 [dev-dependencies]
 assert_cmd = "2"

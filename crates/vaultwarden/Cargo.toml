@@ -35,8 +35,11 @@ tokio = { workspace = true, optional = true }
 # In-house git deps pinned by rev — a deliberate, recorded dependency-policy
 # deviation (deny.toml [sources] carries the rationale); bumping the revs is a
 # deliberate act, all five revs move together (same fidoh workspace commit).
-# Hardware transports + runtime adapter ONLY: hid, pcsc, tokio — the
-# soft-token transport is never enabled by a product feature. The `fidoh`
+# decouple-pcsc-link: the USB HID transport + runtime adapter ride the `fidoh`
+# feature; the pcsc binding (CCID/NFC) is opt-in via `fidoh-pcsc` — its
+# pkg-config link of libpcsclite produced a hard DT_NEEDED that killed exec
+# (exit 127) on pcsclite-less hosts before any typed failure was possible.
+# The soft-token transport is never enabled by a product feature. The `fidoh`
 # facade is pulled for version/license metadata; its lib re-exports nothing,
 # so the API is consumed through the per-crate crates (their documented
 # interface).
@@ -64,10 +67,15 @@ fidoh = [
     "dep:fidoh-core",
     "dep:fidoh-tokio",
     "dep:fidoh-transport-hid",
-    "dep:fidoh-transport-pcsc",
     "dep:secrecy",
     "dep:tokio",
 ]
+# CCID/NFC flavor (opt-in, decouple-pcsc-link): links pcsclite through
+# fidoh-transport-pcsc's `pcsc` binding, exactly as the pre-decoupling
+# default did. The DEFAULT build must never link pcsclite — a host without
+# the library could not even exec the binary. Serve CCID-only keys or NFC
+# ceremonies by building with this feature.
+fidoh-pcsc = ["fidoh", "dep:fidoh-transport-pcsc"]
 
 [dev-dependencies]
 wiremock.workspace = true

@@ -17,12 +17,19 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      # default-fidoh-backend: the default build now embeds fidoh's
-      # pcsc transport, so the CTAP2 system headers join the required gate.
-      - run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev libudev-dev pkg-config
+      # decouple-pcsc-link: the default build links no pcsc library (exec-safe
+      # on pcsclite-less hosts), so pcsclite headers leave the required gate.
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # Gate the exec-compatibility contract: the default binary must carry
+      # no libpcsclite DT_NEEDED (scenario "exec-compat default binary").
+      - run: |
+          cargo build --release
+          if ldd target/release/cryptile | grep -qi pcsclite; then
+            echo "FAIL: default build links pcsclite — exec-unsafe" && exit 1
+          fi
+          ldd target/release/cryptile
 
   # add-fidoh-ceremony-provider: the featured-gate matrix. Additive only —
   # the default `check` job above is the required gate and stays unchanged.
@@ -33,17 +40,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        features: ["cryptile-vaultwarden/fidoh", "cryptile-vaultwarden/webauthn,fidoh"]
+        features: ["cryptile-vaultwarden/fidoh", "cryptile-vaultwarden/webauthn,fidoh", "cryptile-vaultwarden/fidoh-pcsc"]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      # pcsc-sys (fidoh-transport-pcsc) and libudev-sys (the legacy
-      # webauthn stack: webauthn-authenticator-rs -> fido-hid-rs -> udev)
-      # build against system headers; the featured webauthn,fidoh leg is
-      # the first CI job ever to compile the legacy USB path (default
+      # pcsc-sys (fidoh-transport-pcsc, the fidoh-pcsc leg) and libudev-sys
+      # (the legacy webauthn stack: webauthn-authenticator-rs -> fido-hid-rs
+      # -> udev) build against system headers; the featured webauthn,fidoh
+      # leg is the only CI job compiling the legacy USB path (default
       # features never pull it).
       - run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev libudev-dev pkg-config
       - run: cargo fmt --all --check
