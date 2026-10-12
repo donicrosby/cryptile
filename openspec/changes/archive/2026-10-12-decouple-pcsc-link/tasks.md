@@ -17,7 +17,7 @@
       `ldd`-assertion step (no `libpcsclite` in the release/default binary's
       NEEDED); featured matrix gains `cryptile-vaultwarden/fidoh,fidoh-pcsc`.
 - [x] 5. README: pcsc flavor documented under the CTAP2 stack section
-      (opt-in `fidoh-pcsc`, why, who needs it);`fidoh-pcsc` noted for
+      (opt-in `fidoh-pcsc`, why, who needs it); `fidoh-pcsc` noted for
       packagers.
 - [x] 6. Gates: `cargo fmt --all`; `cargo clippy --workspace --all-targets`
       (default) AND `--features fidoh,fidoh-pcsc` zero warnings;
@@ -29,3 +29,10 @@
       verified by len + sha12, plugin-exact argv (`HOME=/opt/data` bare
       CLI) verified; commit (conventional), push, CI green, archive the
       change, commit the archive.
+
+      Landing note (2026-10-12): everything through the archive commit is
+      landed locally on main (deploy + live verification done, stamp
+      0.3.1 confirmed); `git push origin main` is pending because the
+      sandbox's push URL is deliberately frozen
+      (`NO-PUSH-DURING-AGENT-WAVE.invalid`) — the owner pushes and
+      watches CI.
