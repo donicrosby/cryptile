@@ -256,6 +256,7 @@ mod fidoh_backend {
     use fidoh_core::{Ceremony, GetAssertionExchange, UvPolicy};
     use fidoh_tokio::TokioSleep;
     use fidoh_transport_hid::HidTransport;
+    #[cfg(feature = "fidoh-pcsc")]
     use fidoh_transport_pcsc::{library::PcscLibrary, PcscTransport};
     use secrecy::SecretString;
     use sha2::{Digest, Sha256};
@@ -578,9 +579,9 @@ mod fidoh_backend {
     /// Enumerate both hardware transports. A failing transport is a
     /// diagnostic (D2: collect, never short-circuit); pcscd being down must
     /// not hide a USB key.
-    async fn discover(
+    pub(crate) async fn discover(
         hid: &HidTransport,
-        pcsc: Option<&PcscTransport<PcscLibrary>>,
+        #[cfg(feature = "fidoh-pcsc")] pcsc: Option<&PcscTransport<PcscLibrary>>,
         deadline: &Deadline,
         sleep: SleepHandle<'_>,
     ) -> (Vec<DeviceInfo>, Vec<DiscoveryDiagnostic>) {
@@ -593,6 +594,11 @@ mod fidoh_backend {
                 e,
             )),
         }
+        // decouple-pcsc-link: the fidoh-pcsc flavor enumerates the real
+        // transport (None = pcscd down); default builds report the
+        // not-linked cause through the same typed per-transport channel
+        // (D2: collect, never short-circuit — never hide the USB result).
+        #[cfg(feature = "fidoh-pcsc")]
         match pcsc {
             Some(t) => match t.enumerate(deadline, sleep).await {
                 Ok(found) => candidates.extend(found),
@@ -609,6 +615,17 @@ mod fidoh_backend {
                 )),
             )),
         }
+        #[cfg(not(feature = "fidoh-pcsc"))]
+        diagnostics.push(DiscoveryDiagnostic::new(
+            fidoh_core::transport::TransportKind::Pcsc,
+            Error::Transport(fidoh_core::TransportError::new(
+                "pcsc",
+                String::from(
+                    "pcsc transport not linked into this build \
+                     (rebuild with --features fidoh-pcsc for CCID/NFC)",
+                ),
+            )),
+        ));
         (candidates, diagnostics)
     }
 
@@ -652,7 +669,10 @@ mod fidoh_backend {
         let first = rt
             .block_on(async {
                 // The real PC/SC context, or None when pcscd is down (diagnostic,
-                // never a mask for the USB transport).
+                // never a mask for the USB transport). Exists only in the
+                // fidoh-pcsc flavor; default builds link no pcsc transport and
+                // discovery reports it not-linked (decouple-pcsc-link).
+                #[cfg(feature = "fidoh-pcsc")]
                 let pcsc = PcscLibrary::establish().ok().map(PcscTransport::new);
 
                 // Discovery → explicit deterministic selection. `First` is the
@@ -660,6 +680,7 @@ mod fidoh_backend {
                 // because two keys are plugged in; the server's allow-list makes
                 // the wrong key answer `NoCredentials` (typed AUTH), never a
                 // silent success.
+                #[cfg(feature = "fidoh-pcsc")]
                 let (candidates, diagnostics) = discover(
                     &HidTransport::new(),
                     pcsc.as_ref(),
@@ -667,6 +688,9 @@ mod fidoh_backend {
                     sleep.handle(),
                 )
                 .await;
+                #[cfg(not(feature = "fidoh-pcsc"))]
+                let (candidates, diagnostics) =
+                    discover(&HidTransport::new(), &deadline, sleep.handle()).await;
                 let descriptors: Vec<CandidateDescriptor> =
                     candidates.iter().map(|info| info.descriptor()).collect();
                 let selected = apply_selection(&SelectionPolicy::First, &descriptors)
@@ -698,23 +722,34 @@ mod fidoh_backend {
                     )
                     .await
                 } else {
-                    let Some(t) = pcsc else {
-                        return Err(CeremonyError::NoDevice(diagnostics));
-                    };
-                    let dev = t
-                        .connect(&selected.id, &deadline, sleep.handle())
+                    // decouple-pcsc-link: the pcsc connect path exists only in
+                    // the fidoh-pcsc flavor. Default builds can only select HID
+                    // candidates (discover enrolls nothing else), so this arm
+                    // answers the typed no-device, diagnostics included.
+                    #[cfg(not(feature = "fidoh-pcsc"))]
+                    {
+                        Err(CeremonyError::NoDevice(diagnostics))
+                    }
+                    #[cfg(feature = "fidoh-pcsc")]
+                    {
+                        let Some(t) = pcsc else {
+                            return Err(CeremonyError::NoDevice(diagnostics));
+                        };
+                        let dev = t
+                            .connect(&selected.id, &deadline, sleep.handle())
+                            .await
+                            .map_err(CeremonyError::from_core)?;
+                        run_ceremony(
+                            TouchPrompt {
+                                inner: dev,
+                                prompted: false,
+                            },
+                            xch,
+                            &deadline,
+                            sleep.handle(),
+                        )
                         .await
-                        .map_err(CeremonyError::from_core)?;
-                    run_ceremony(
-                        TouchPrompt {
-                            inner: dev,
-                            prompted: false,
-                        },
-                        xch,
-                        &deadline,
-                        sleep.handle(),
-                    )
-                    .await
+                    }
                 }
             })
             .map_err(map_ceremony_error)?;
@@ -1040,6 +1075,43 @@ mod legacy_tests {
 #[cfg(test)]
 mod fidoh_tests {
     use super::*;
+
+    /// Scenario exec-compat-pcsc-diagnostic (decouple-pcsc-link): in the
+    /// default (pcsc-binding-free) build, discovery still reports the pcsc
+    /// transport by name through the typed per-transport diagnostic channel,
+    /// with the not-linked cause — never a silent omission, never a loader
+    /// abort.
+    #[test]
+    #[cfg(not(feature = "fidoh-pcsc"))]
+    fn default_build_discovery_reports_pcsc_not_linked() {
+        // The HID enumerate result is host-dependent (a plugged key yields
+        // candidates); the pcsc diagnostic is build-determined, so only that
+        // is asserted.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let sleep = fidoh_tokio::TokioSleep;
+        let (_, diagnostics) = rt.block_on(crate::webauthn::fidoh_backend::discover(
+            &fidoh_transport_hid::HidTransport::new(),
+            &fidoh_core::time::Deadline::new(std::time::Duration::from_secs(1)),
+            sleep.handle(),
+        ));
+        let pcsc = diagnostics
+            .iter()
+            .find(|d| d.kind == fidoh_core::transport::TransportKind::Pcsc)
+            .expect("pcsc diagnostic present in no-binding builds");
+        match &pcsc.cause {
+            fidoh_core::error::Error::Transport(te) => {
+                assert_eq!(te.kind, "pcsc");
+                assert!(
+                    te.detail.contains("not linked into this build"),
+                    "unexpected pcsc diagnostic: {te}"
+                );
+            }
+            other => panic!("pcsc diagnostic must be a Transport error, got {other:?}"),
+        }
+    }
 
     #[test]
     fn error_mapping_is_total_and_classed() {

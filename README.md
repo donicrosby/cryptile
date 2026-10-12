@@ -180,8 +180,14 @@ acquires the key PIN on the tty only when the ceremony demands it
 (headless runs fail typed instead of prompting), and carries an explicit
 60 s ceremony budget: a wedged key or a touch never given fails with a
 typed "budget expired" error (exit 4, with a remediation hint) instead
-of an unbounded wait. Hardware transports only (usb HID + PC/SC); no-device
-and transport failures map to exit 4 rather than exit 3.
+of an unbounded wait. The default build serves USB HID only and links no
+pcsc library, so it runs on any host — where pcsclite is absent it fails
+typed (exit 4) instead of dying at exec, and discovery reports the pcsc
+transport as not linked. CCID/NFC (PC/SC) rides the opt-in `fidoh-pcsc`
+feature (`cargo install --features fidoh-pcsc`): the build needs
+`pkg-config` + `libpcsclite-dev` headers, and hosts without the pcsclite
+runtime library cannot exec the resulting binary. No-device and transport
+failures map to exit 4 rather than exit 3.
 
 **Legacy escape hatch (`webauthn` feature).** The replaced
 `webauthn-authenticator-rs` stack stays reachable one more cycle: build
