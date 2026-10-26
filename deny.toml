@@ -12,6 +12,16 @@ ignore = [
   # server per sync; no attacker-controlled timing oracle at our boundary.
   # Revisit when RustCrypto ships the constant-time rewrite.
   "RUSTSEC-2023-0071",
+  # RUSTSEC-2026-0387 (crypto-bigint timing variability): no patched 0.5.x
+  # exists; the fix requires >=0.7.6, i.e. a new elliptic-curve/ecdsa/p256
+  # generation from RustCrypto. Doubly blocked: fidoh-core exact-pins
+  # p256 =0.13.2, so even a fixed p256 needs a fidoh release first.
+  # Accepted for a scoped reason: p256 here is local-only ceremony crypto
+  # (COSE/ES256 verification, CTAP2 pinUvAuthProtocol ECDH) inside a local
+  # CLI — there is no remote timing oracle, and a same-machine attacker
+  # already defeats a secrets CLI's threat model. Revisit when RustCrypto
+  # ships the fix AND fidoh-core bumps its p256 pin.
+  "RUSTSEC-2026-0387",
 ]
 
 [licenses]
