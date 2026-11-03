@@ -18,6 +18,15 @@ updates:
       # releases a digest-0.11 generation.
       - dependency-name: "sha1"
         versions: [">=0.11"]
+      # webauthn-authenticator-rs 0.6 turned WebauthnAuthenticator from a
+      # struct into a trait — crates/vaultwarden/src/webauthn.rs is written
+      # against the 0.5 API (exact-pinned =0.5.5 in the workspace manifest).
+      # The crate is the distrusted legacy path being REPLACED by fidoh
+      # (openspec add-fidoh-ceremony-provider, deny.toml rationale), so
+      # porting webauthn.rs to the 0.6 API is wasted work on dead code.
+      # Revisit only if fidoh is abandoned; 0.5.x patch bumps still flow.
+      - dependency-name: "webauthn-authenticator-rs"
+        versions: [">=0.6"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
